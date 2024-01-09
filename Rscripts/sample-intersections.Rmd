@@ -30,10 +30,8 @@ compare_plot = function(z, x_col, y_col){
 
 z=compare_plot(comparisons, "GM12878", "PS00356")    
 my_ggsave("Figures/FIRE-peak-corelation-GM12878-PS00356.pdf", height=2, width=2.5)
-z=compare_plot(comparisons, "PS00388", "PS00356")    
-my_ggsave("Figures/FIRE-peak-corelation-PS000388-PS00356.pdf", height=2, width=2.5)
-z=compare_plot(comparisons, "GM12878", "GM12878_30X")    
-my_ggsave("Figures/FIRE-peak-corelation-GM12878-30X.pdf", height=2, width=2.5)
+z=compare_plot(comparisons, "PS00338", "PS00356")    
+my_ggsave("Figures/FIRE-peak-corelation-PS000338-PS00356.pdf", height=2, width=2.5)
 ```
 
 ```{r}

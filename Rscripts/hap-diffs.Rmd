@@ -166,7 +166,7 @@ p = tdf %>%
         direction="y",
         force=2,
         nudge_y=0.01,
-        size=3,
+        size=2.5,
     )+
     my_grid()
 my_ggsave(out_file_2, height=3, width=5)
