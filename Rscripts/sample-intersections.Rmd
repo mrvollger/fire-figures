@@ -25,6 +25,7 @@ compare_plot = function(z, x_col, y_col){
         scale_x_continuous(glue("FIRE score of {x_col}"), limits=c(0,100)) + 
         scale_y_continuous(glue("FIRE score of {y_col}"), limits=c(0,100)) + 
         #facet_row(~name,    strip.position = "left") + 
+        coord_fixed() +
         my_grid()
 }
 
@@ -32,6 +33,8 @@ z=compare_plot(comparisons, "GM12878", "PS00356")
 my_ggsave("Figures/FIRE-peak-corelation-GM12878-PS00356.pdf", height=2, width=2.5)
 z=compare_plot(comparisons, "PS00338", "PS00356")    
 my_ggsave("Figures/FIRE-peak-corelation-PS000338-PS00356.pdf", height=2, width=2.5)
+z=compare_plot(comparisons, "GM12878", "GM12878_30X")
+my_ggsave("Figures/FIRE-peak-corelation-GM12878-30X.pdf", height=2, width=2.5)
 ```
 
 ```{r}
