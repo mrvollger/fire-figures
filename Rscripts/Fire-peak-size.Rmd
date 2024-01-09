@@ -20,6 +20,7 @@ z=fire_df %>%
     geom_density_ridges2()+ 
     scale_y_discrete("Density of FIRE peak size for different % accessibility bins") +     # will generally have to set the `expand` option
     scale_x_continuous(
+        "FIRE peak size (bp)",
         expand = c(0, 0),
         trans="log10",
         label=comma,

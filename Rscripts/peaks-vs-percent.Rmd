@@ -273,7 +273,7 @@ my_ggsave("Figures/DNase-vs-FIRE.pdf", height=3, width=4)
 
 # dnase by peak size
 ```{r}
-fire_df %>% mutate(
+z=fire_df %>% mutate(
         psize=end-start,
         size_group = cut(psize, breaks=c(0,200,250,300,Inf)),
         size_group2=size_group,
@@ -389,7 +389,7 @@ comma(sum(fire_df$acc_percent)*2)
 
 # 10bp df that andrew doesnt like
 ```{r}
-bp = fread("data/bedgraph_annotations/bo.10bp.bed.gz", nThread=8)
+bp = fread("../phased-fdr-and-peaks/data/bedgraph_annotations/bo.10bp.bed.gz", nThread=8)
 
 bp[, c("chrom", "start", "end") := tstrsplit(key, "_", fixed=TRUE, type.convert=TRUE)]
 bp$mid = floor((bp$start + bp$end)/2)
@@ -397,7 +397,7 @@ bp$position = bp$st - bp$mid
 dim(bp)/1e6
 bp
 
-df_bp = merge(bp, df[, c("chrom", "start", "end", "group")], by=c("chrom", "start", "end")) %>%
+df_bp = merge(bp, fire_df[, c("chrom", "start", "end", "group")], by=c("chrom", "start", "end")) %>%
     replace_na(list(ENCFF658WKQ_DNase = 0)) %>%
     pivot_longer(
         cols = starts_with("EN", ignore.case = FALSE),
@@ -405,7 +405,7 @@ df_bp = merge(bp, df[, c("chrom", "start", "end", "group")], by=c("chrom", "star
         values_to="coverage",
     ) %>%
     filter(!is.na(coverage)) %>%
-    data.table
+    data.table()
 df_bp
 ```
 ```{r}
@@ -511,11 +511,11 @@ df_bp %>%
 ```{r}
 f="Tables/per_site_windows_dnase_and_percent_fire.tbl.gz"
 windows_near_fire_peaks = fread(f)
-colnames(windows_near_fire_peaks) = c("window_chrom", "window_start", "window_end", "ID", "data Fiber-seq % accessible", "data DNase signal")
+colnames(windows_near_fire_peaks) = c("window_chrom", "window_start", "window_end", "ID", "data Fiber-seq % accessible", "data DNase signal", "data ATAC signal")
 windows_near_fire_peaks 
 ```
 ```{r}
-tFDR=0.01
+tFDR=0.05
 peaks_to_sample = fire_df %>% filter(FDR < tFDR) %>% group_by(group) %>% sample_n(100) %>% select(group,ID) %>% data.table
 sampled_windows_near_fire_peaks = merge(windows_near_fire_peaks, peaks_to_sample, by="ID") %>%
     pivot_longer(
@@ -581,7 +581,7 @@ z = sampled_windows_near_fire_peaks %>%
         strip.text.y = element_text(size = 4),
         strip.text.x = element_text(size = 6),
     )
-my_ggsave("Figures/per-site-observations-FDR-{tFDR}.pdf", height=4, width=4)
+my_ggsave("Figures/per-site-observations-FDR-{tFDR}.pdf", height=4, width=6)
 ```
 
 

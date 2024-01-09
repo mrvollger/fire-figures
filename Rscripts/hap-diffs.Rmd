@@ -95,14 +95,12 @@ scientific_10 <- function(x) {
 #
 ```{r}
 p_threshold=0.05
-in_file="results/GM12878_FDR/hap1-vs-hap2/FIRE.hap.differences.bed"
-out_file_1="Figures/GM12878_FDR-hap1-vs-hap2.pdf"
-out_file_2="Figures/GM12878_FDR-hap1-vs-hap2-volcano.pdf"
-
-
+in_file="results/GM12878/hap1-vs-hap2/FIRE.hap.differences.bed"
+out_file_1="Figures/GM12878-hap1-vs-hap2.pdf"
+out_file_2="Figures/GM12878-hap1-vs-hap2-volcano.pdf"
 
 # make the plots
-imprinted=my_read_bed("data/lcl_dmr_coordinates_Akbari.bed")
+imprinted=my_read_bed("data/lcl_dmr_coordinates_Akbari.bed.gz")
 df = my_read_bed(in_file) 
 colnames(df)[1:5]=c("chrom","start","end","xstart","xend")
 tdf = df %>%
@@ -155,35 +153,22 @@ p = tdf %>%
         trans=reverselog_trans(10),
         labels=scientific_10,
     ) + 
+    geom_text_repel(
+        data = . %>% 
+            filter(p_value < 0.05) %>%
+            group_by(autosome, p_adjust < 0.05, p_value < 0.05) %>%
+            summarise(count = n()),
+        aes(
+            label = paste0("n = ", comma(count)),
+            x=0.750, 
+            y=rep(c(p_threshold, cor_p_threshold),2),
+        ),
+        direction="y",
+        force=2,
+        nudge_y=0.01,
+        size=3,
+    )+
     my_grid()
 my_ggsave(out_file_2, height=3, width=5)
 
-# save the table 
-fwrite(tdf[tdf$p_value <= 1], out_file_3, sep="\t")
-# save the bed9
-# 
-tdf %>%
-    mutate(
-        score = pmin(round(1/p_value), 1000),
-        name = paste0(
-            round(p_value,5), "_",
-            round(100*hap1_frac_acc,2), "_",
-            round(100*hap2_frac_acc,2)
-        ),
-        tst=st+1,
-        ten=case_when(
-            p_value<=p_threshold ~ en - 1,
-            TRUE ~ st+2
-        ),
-        strand=".",
-        color = case_when(
-            hap1_frac_acc > hap2_frac_acc & p_value > p_threshold ~ "0,0,100",
-            hap1_frac_acc > hap2_frac_acc ~ "0,0,255",
-            hap2_frac_acc > hap1_frac_acc & p_value > p_threshold ~ "100,0,0",
-            hap2_frac_acc > hap1_frac_acc ~ "255,0,0",
-            TRUE ~ "200,200,200"
-        )
-    ) %>%
-    select(c("#chrom", "st", "en", "name", "score", "strand", "tst", "ten", "color")) %>%
-    fwrite(out_file_4, sep="\t", quote=F, na=".", row.names=F)
 ```

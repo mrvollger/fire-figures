@@ -1,7 +1,6 @@
 ```{r}
 source("Rscripts/utils.R")
 library(valr)
-setwd("~/projects/phased-fdr-and-peaks/")
 getwd()
 ```
 

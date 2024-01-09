@@ -2,20 +2,19 @@ source("Rscripts/utils.R")
 library(regioneR)
 library(BSgenome.Hsapiens.UCSC.hg38)
 if(F){
-    in_file="results/GM12878_FDR/FDR-peaks/FDR-FIRE-peaks.bed.gz"
-    out_file="Figures/peaks-vs-percentage.pdf"
-    encode=my_read_bed("data/ENCODE3_consensus_DHS_ENCFF503GCK.tsv")
-    sds=my_read_bed("workflow/annotations/SDs.merged.hg38.bed.gz")
+    in_file="results/GM12878/FDR-peaks/FDR-FIRE-peaks.bed.gz"
+    encode=my_read_bed("data/ENCODE3_consensus_DHS_ENCFF503GCK.tsv.gz")
+    sds=my_read_bed("data/SDs.merged.hg38.bed.gz")
     tss=my_read_bed("data/gencode.v42.annotation_TSS.gff3")
-    imprinted=my_read_bed("data/lcl_dmr_coordinates_Akbari.bed")
+    imprinted=my_read_bed("data/lcl_dmr_coordinates_Akbari.bed.gz")
 
-    dnase_peaks=my_read_bed("data/ENCFF762CRQ_DNase_peaks.bed.gz")
-    dnase=my_read_bed("data/bedgraph_annotations/ENCFF960FMM_dnase_signal.bed")
+    dnase_peaks=my_read_bed("../phased-fdr-and-peaks/data/ENCFF762CRQ_DNase_peaks.bed.gz")
+    dnase=my_read_bed("../phased-fdr-and-peaks/data/bedgraph_annotations/ENCFF960FMM_dnase_signal.bed")
     colnames(dnase)[4] = "dnase_sig"
     dnase
     
-    atac_peaks = my_read_bed("scATAC/10X_GM12878_peaks_max_cov.bed")
-    atac = my_read_bed("data/ATAC/10X_GM12878_aggr_scATAC.bg.gz")
+    atac_peaks = my_read_bed("../phased-fdr-and-peaks/scATAC/10X_GM12878_peaks_max_cov.bed")
+    atac = my_read_bed("../phased-fdr-and-peaks/data/ATAC/10X_GM12878_aggr_scATAC.bg.gz")
     colnames(atac)[4] = "atac_sig"
     atac
     

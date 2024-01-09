@@ -18,7 +18,7 @@ library(rlang)
 ```{r}
 sd_range = 2
 # Tumor PS00357
-fire = fread("results/PS00357/FDR-peaks/FDR-FIRE-peaks.bed.gz") %>%
+fire = fread("results/PS00357_COLO829T_1/FDR-peaks/FDR-FIRE-peaks.bed.gz") %>%
     # require 95% phasing
     filter(
         `#chrom` != "chrX",
