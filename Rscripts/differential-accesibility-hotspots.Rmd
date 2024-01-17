@@ -1,0 +1,142 @@
+---
+title: "R Notebook"
+output: html_notebook
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+# get a fire peak data table called `df`
+source("Rscripts/Fire-peak-df.R")
+```
+
+```{r}
+f1 = "results/GM12878/hap1-vs-hap2/FIRE.hap.differences.bed"
+f2 = "results/PS00338_COLO829BL_1/hap1-vs-hap2/FIRE.hap.differences.bed"
+f3 = "results/PS00356_COLO829BL_2/hap1-vs-hap2/FIRE.hap.differences.bed"
+f4 = "results/PS00381/hap1-vs-hap2/FIRE.hap.differences.bed"
+f5 = "results/PS00382/hap1-vs-hap2/FIRE.hap.differences.bed"
+f6 = "results/PS00383/hap1-vs-hap2/FIRE.hap.differences.bed"
+f7 = "results/PS00384/hap1-vs-hap2/FIRE.hap.differences.bed"
+df1=fread(f1)
+df2=fread(f2)
+df3=fread(f3)
+df4=fread(f4)
+df5=fread(f5)
+df6=fread(f6)
+df7=fread(f7)
+df = bind_rows(
+    list(
+        #GM12878=df1,
+        #PS00338=df2,
+        #PS00356=df3,
+        PS00381=df4,
+        PS00382=df5,
+        PS00383=df6,
+        PS00384=df7
+        ),
+    .id="sample"
+)
+
+imprinted=my_read_bed("data/lcl_dmr_coordinates_Akbari.bed.gz")
+
+samples = unique(df$sample)
+colors = c(
+    "GM12878"="darkgreen",
+    "PS00338"="darkred",
+    "PS00356"="red",
+    "PS00381"="darkblue",
+    "PS00382"="blue",
+    "PS00383"="darkorange",
+    "PS00384"="orange"
+    )
+df$color = colors[df$sample]
+```
+
+```{r}
+df %>%
+    filter(`#chrom` != "chrX") %>%
+    filter(p_adjust <= 0.05) %>%
+    ggplot(
+        aes( y= `#chrom`, x = peak_start, color=sample)
+    )+
+    geom_density_ridges2() +
+    theme_minimal_grid()
+my_ggsave("tmp.pdf")
+```
+
+```{r}
+system("rm tmp.pdf")
+s = 3
+pdf("tmp.pdf", height=2*s, width=8*s)
+
+mhc = "chr6:28,510,120-33,480,577"
+mhc.region = toGRanges(data.frame("chr6", 28510120, 33480577))
+mhc.region
+
+chrs = paste0("chr", seq(1,22))
+for(idx in seq(3)){
+    ymax=20
+    if(idx == 1){
+        c = chrs[1:8]
+        ws=10e5
+    }else if (idx == 2){
+        c = chrs[9:22]
+        ws=10e5
+    } else if (idx == 3){
+        ymax=NULL
+        c = "chr6"
+        zoom.region = mhc.region
+        ws = 1e4
+    }
+
+    tdf=df[p_value <= 0.05 & `#chrom` %in% c]
+    gr = GRanges(seqnames=tdf$`#chrom`, IRanges(start=tdf$peak_start, end=tdf$peak_end))
+    imprinted_gr = GRanges(imprinted[chrom %in% c])
+
+    if(length(c) == 1){
+        kp = karyoploteR::plotKaryotype(genome="hg38", plot.type=4, zoom=zoom.region)
+    }else{
+        kp = karyoploteR::plotKaryotype(genome="hg38", plot.type=4, chromosomes = c)
+    }
+    
+    kpAddBaseNumbers(kp)
+
+    kpPlotDensity(kp, gr,
+        col="blue",
+        ymax = ymax,
+        r0=0.0, r1=0.5,
+        #border=NA,
+        window.size=ws,
+    )
+    kpPlotRegions(kp, imprinted_gr, col="darkorange", data.panel=1, r0=-0.05, r1=0.0)
+
+    r0 = 0.5
+    r_width = 1/2 * 1/length(unique(tdf$color))
+    for(color in unique(tdf$color)){
+        cond = tdf$color == color
+        ttdf = tdf[cond,]
+        sample.regions = GRanges(seqnames=ttdf$`#chrom`, IRanges(start=ttdf$peak_start, end=ttdf$peak_end))
+        kpPlotDensity(
+            kp, data=sample.regions, 
+            r0=r0, r1=r0 + r_width, 
+            border=transparent(color, 0.5),
+            col=color,
+            #border=NA,
+            data.panel=1,
+            ymax=ymax,
+            window.size=ws,
+        )
+        r0 = r0 + r_width
+        print(nrow(ttdf))
+    }
+}
+
+
+
+
+dev.off()
+system("cp tmp.pdf Figures/differential-peaks-ideogram.pdf")
+dev.off()
+
+```

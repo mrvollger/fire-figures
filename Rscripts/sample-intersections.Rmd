@@ -79,7 +79,7 @@ my_ggsave("Figures/DNase-peaks-vs-percent-fire.pdf", height=2, width=2.75)
 
 # FDR vs SCORE
 ```{r}
-fdr.df = fread("results/GM12878_FDR/FDR-peaks/FIRE.score.to.FDR.tbl") %>%
+fdr.df = fread("results/GM12878/FDR-peaks/FIRE.score.to.FDR.tbl") %>%
     pivot_longer(
         contains("peaks")
     ) %>% data.table()
@@ -104,7 +104,7 @@ fdr.df %>%
         ),
         labels=c("Observed FIRE elements", "Shuffled FIRE elements")
     )+
-    annotation_logticks(side="l") + 
+    annotation_logticks(side="l", size=.2) + 
     my_grid() +
     theme(
         legend.position="top"
@@ -116,8 +116,8 @@ my_ggsave("Figures/FIRE-score-vs-shuffled.pdf", height=2, width=2.5)
 ```{r}
 fdr_vs_score = bind_rows(
     list(
-        X130 = fread("results/GM12878_FDR/FDR-peaks/FIRE.score.to.FDR.tbl"),
-        X30 = fread("results/GM12878_FDR_30X/FDR-peaks/FIRE.score.to.FDR.tbl")
+        X130 = fread("results/GM12878/FDR-peaks/FIRE.score.to.FDR.tbl"),
+        X30 = fread("results/30X_GM12878/FDR-peaks/FIRE.score.to.FDR.tbl")
     ),
     .id="id"
 )
