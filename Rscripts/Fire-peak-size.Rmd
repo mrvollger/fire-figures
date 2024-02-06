@@ -6,9 +6,8 @@ editor_options:
 ---
 
 ```{r}
-# get a fire peak data table called `df`
+# get a fire peak data table called `fire_df`
 source("Rscripts/Fire-peak-df.R")
-library(ggridges)
 ```
 
 ```{r}
@@ -30,4 +29,42 @@ z=fire_df %>%
     #theme_ridges() 
     my_hgrid()
 my_ggsave("Figures/FIRE-peak-size.pdf", width=3, height=3)
+
+mean(fire_df$psize)
+sd(fire_df$psize)
+
 ```
+
+```{r}
+sd_df = fire_df %>% 
+    select(FIRE_start_ssd, FIRE_end_ssd, group) %>%
+    pivot_longer(cols=c(FIRE_start_ssd, FIRE_end_ssd), names_to="start_end", values_to="sd") 
+sd_df %>% 
+    group_by(start_end) %>%
+    dplyr::summarize(
+        mean=mean(sd),
+        median=median(sd),
+    )
+mean(sd_df$sd)
+
+z=sd_df %>%
+  ggplot(aes(x=sd+1)) + 
+    geom_histogram(bins=100)+
+    #geom_text(
+    #    data = data.frame(x=mean(sd_df$sd), y=1000, label="Mean"),
+    #    aes(x=x, y=y, label=comma(x)),
+    #) +
+    scale_x_continuous(
+        "Standard deviation in start or end position\nof FIRE elements over a FIRE peak (bp)",
+        #expand = c(0, 0),
+        trans="log10",
+        label=comma,
+    ) +   # for both axes to remove unneeded padding
+    annotation_logticks(side="b")+
+    #facet_col(~start_end)+
+    coord_cartesian(xlim=c(10,1000))+
+    my_hgrid()
+my_ggsave("Figures/FIRE-peak-size-std-dev.pdf", width=3, height=2)
+```
+
+On average FIRE peaks are 208.9 bp long with a standard deviation of 67.7 bp; however, the elements of accessibility underlying these peaks will also vary in their start and end positions compared to the peak (standard deviation of 83.3 bp). 

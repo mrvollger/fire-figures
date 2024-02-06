@@ -8,6 +8,18 @@ editor_options:
 ```{r}
 # get a fire peak data table called `df`
 source("Rscripts/Fire-peak-df.R")
+FAI = fread("~/assemblies/hg38.analysisSet.chrom.sizes") %>%
+    filter(!grepl("_", V1))
+colnames(FAI) = c("chrom", "end")
+FAI$start= 0
+```
+
+
+```{r}
+SDs=my_read_bed("../FIREv2.0/workflow/annotations/SDs.merged.hg38.bed.gz")
+SD_size = sum(SDs$end - SDs$start)
+G_size = sum(FAI$end - FAI$start)
+SD_size/G_size
 ```
 
 ```{r}
@@ -18,39 +30,80 @@ f4 = "results/PS00381/hap1-vs-hap2/FIRE.hap.differences.bed"
 f5 = "results/PS00382/hap1-vs-hap2/FIRE.hap.differences.bed"
 f6 = "results/PS00383/hap1-vs-hap2/FIRE.hap.differences.bed"
 f7 = "results/PS00384/hap1-vs-hap2/FIRE.hap.differences.bed"
-df1=fread(f1)
-df2=fread(f2)
-df3=fread(f3)
-df4=fread(f4)
-df5=fread(f5)
-df6=fread(f6)
-df7=fread(f7)
+f8 = "results/PS00272/hap1-vs-hap2/FIRE.hap.differences.bed"
+f9 = "results/PS00321/hap1-vs-hap2/FIRE.hap.differences.bed"
+f10 = "results/PS00327/hap1-vs-hap2/FIRE.hap.differences.bed"
+f11 = "results/UDN318336_PS00189/hap1-vs-hap2/FIRE.hap.differences.bed"
+df1=my_read_bed(f1)
+df2=my_read_bed(f2)
+df3=my_read_bed(f3)
+df4=my_read_bed(f4)
+df5=my_read_bed(f5)
+df6=my_read_bed(f6)
+df7=my_read_bed(f7)
+df8=my_read_bed(f8)
+df9=my_read_bed(f9)
+df10=my_read_bed(f10)
+df11=my_read_bed(f11)
 df = bind_rows(
     list(
-        #GM12878=df1,
-        #PS00338=df2,
-        #PS00356=df3,
+        GM12878=df1,
+        PS00338=df2,
+        PS00356=df3,
         PS00381=df4,
         PS00382=df5,
         PS00383=df6,
-        PS00384=df7
+        PS00384=df7,
+        PS00272=df8,
+        PS00321=df9,
+        PS00327=df10,
+        UDN318336_PS00189=df11
         ),
     .id="sample"
-)
+) %>% mutate(p_value <= 0.05) %>%
+    bed_map(SDs,
+        is_SD = n() > 0
+    ) %>%
+    replace_na(
+        list(is_SD=F)
+    )
 
 imprinted=my_read_bed("data/lcl_dmr_coordinates_Akbari.bed.gz")
 
 samples = unique(df$sample)
 colors = c(
-    "GM12878"="darkgreen",
-    "PS00338"="darkred",
-    "PS00356"="red",
-    "PS00381"="darkblue",
-    "PS00382"="blue",
-    "PS00383"="darkorange",
-    "PS00384"="orange"
+    "LCL"="darkgreen",
+    "CD8+"="darkred",
+    "Thyroid"="darkblue",
+    "Fibroblast"="darkorange"
     )
-df$color = colors[df$sample]
+sample_type = c(
+    "GM12878"="LCL",
+    "PS00338"="LCL",
+    "PS00356"="LCL",
+    "PS00381"="CD8+",
+    "PS00382"="CD8+",
+    "PS00383"="CD8+",
+    "PS00384"="CD8+",
+    "PS00272"="Thyroid",
+    "PS00321"="Thyroid",
+    "PS00327"="Thyroid",
+    "PS00388"="Thyroid",
+    "UDN318336_PS00189"="Fibroblast"
+)
+df$sample_type = sample_type[df$sample]
+df$color = colors[df$sample_type]
+df
+
+df %>% 
+    #filter(p_adjust<=0.05) %>%
+    #group_by(sample) %>% 
+    dplyr::summarize(
+        SD = sum(is_SD),
+        NOT_SD = sum(!is_SD),
+        total = n(),
+        percent_SD = SD/total * 100,
+    )
 ```
 
 ```{r}
@@ -67,30 +120,44 @@ my_ggsave("tmp.pdf")
 
 ```{r}
 system("rm tmp.pdf")
-s = 3
+s = 4
 pdf("tmp.pdf", height=2*s, width=8*s)
 
 mhc = "chr6:28,510,120-33,480,577"
 mhc.region = toGRanges(data.frame("chr6", 28510120, 33480577))
+notch="chr1:146,148,865-146,229,021"
+notch.region = toGRanges(data.frame("chr1", 146148865-1e6, 146229021+1e6))
+
 mhc.region
 
 chrs = paste0("chr", seq(1,22))
-for(idx in seq(3)){
+for(idx in seq(4)){
     ymax=20
     if(idx == 1){
-        c = chrs[1:8]
+        c = chrs[1:22]
         ws=10e5
+        grouping_var = "sample"
     }else if (idx == 2){
-        c = chrs[9:22]
+        # skip this block
+        c = chrs[1:22]
         ws=10e5
+        grouping_var = "sample_type"
     } else if (idx == 3){
         ymax=NULL
         c = "chr6"
         zoom.region = mhc.region
         ws = 1e4
+    } else if(idx == 4){
+        ymax=NULL
+        c = "chr1"
+        zoom.region = notch.region
+        ws = 1e4
     }
 
-    tdf=df[p_value <= 0.05 & `#chrom` %in% c]
+    tdf=df[p_value <= 0.05 & `#chrom` %in% c] %>%
+        group_by(sample_type) %>%
+        arrange(sample, .by_group=T)
+
     gr = GRanges(seqnames=tdf$`#chrom`, IRanges(start=tdf$peak_start, end=tdf$peak_end))
     imprinted_gr = GRanges(imprinted[chrom %in% c])
 
@@ -102,31 +169,39 @@ for(idx in seq(3)){
     
     kpAddBaseNumbers(kp)
 
-    kpPlotDensity(kp, gr,
-        col="blue",
-        ymax = ymax,
-        r0=0.0, r1=0.5,
-        #border=NA,
-        window.size=ws,
-    )
+    #kpPlotDensity(kp, gr, col="blue", ymax = ymax, r0=0.0, r1=0.5, border=NA, window.size=ws,)
     kpPlotRegions(kp, imprinted_gr, col="darkorange", data.panel=1, r0=-0.05, r1=0.0)
 
-    r0 = 0.5
-    r_width = 1/2 * 1/length(unique(tdf$color))
-    for(color in unique(tdf$color)){
-        cond = tdf$color == color
+    r0 = 0 # 0.5
+    r_width = 1/length(unique(tdf[[grouping_var]])) # * 0.5
+    for(var in unique(tdf[[grouping_var]])){
+        r1 = r0 + r_width*0.85
+        cond = tdf[[grouping_var]] == var
         ttdf = tdf[cond,]
+        st = ttdf[[grouping_var]][[1]]
+        color = ttdf$color[[1]]
         sample.regions = GRanges(seqnames=ttdf$`#chrom`, IRanges(start=ttdf$peak_start, end=ttdf$peak_end))
-        kpPlotDensity(
+        
+        tkp = kpPlotDensity(
             kp, data=sample.regions, 
-            r0=r0, r1=r0 + r_width, 
+            r0=r0, r1=r1, 
             border=transparent(color, 0.5),
             col=color,
             #border=NA,
             data.panel=1,
-            ymax=ymax,
+            #Zymax=ymax,
             window.size=ws,
         )
+        print(tkp$latest.plot$computed.values$max.density)
+        kpAxis(kp, 
+            ymax=tkp$latest.plot$computed.values$max.density,
+            r0=r0, r1=r1,
+            cex=0.5,
+            side="right",
+            numticks=2,
+        )
+        kpAddLabels(kp, labels = st, r0=r0, r1=r1, cex=1)
+
         r0 = r0 + r_width
         print(nrow(ttdf))
     }
@@ -139,4 +214,374 @@ dev.off()
 system("cp tmp.pdf Figures/differential-peaks-ideogram.pdf")
 dev.off()
 
+```
+
+
+
+
+
+
+
+
+
+
+
+# ~Mbp similarity comparison, intra vs inter hap similarity
+
+```{r}
+library(lsa)
+AUO = F
+if(AUO){
+    peak_files = c(
+        "results/PS00381/FDR-peaks/FDR-FIRE-peaks.bed.gz",
+        "results/PS00382/FDR-peaks/FDR-FIRE-peaks.bed.gz",
+        "results/PS00383/FDR-peaks/FDR-FIRE-peaks.bed.gz",
+        "results/PS00384/FDR-peaks/FDR-FIRE-peaks.bed.gz"
+    )
+} else {
+    peak_files = c(
+        "results/GM12878/FDR-peaks/FDR-FIRE-peaks.bed.gz",
+        "results/PS00338_COLO829BL_1/FDR-peaks/FDR-FIRE-peaks.bed.gz"
+    )
+}
+row_files = paste(peak_files, sep = " ", collapse = " ")
+all_peaks = fread(cmd=glue("less {row_files} | bedtools sort | bedtools merge"))
+colnames(all_peaks) = c("chrom", "start", "end")
+all_peaks
+```
+
+
+```{r}
+if(AUO){
+    PS00381 = fread("results/PS00381/FDR-peaks/FDR.track.coverage.filtered.bed.gz")
+    PS00382 = fread("results/PS00382/FDR-peaks/FDR.track.coverage.filtered.bed.gz")
+    PS00383 = fread("results/PS00383/FDR-peaks/FDR.track.coverage.filtered.bed.gz")
+    PS00384 = fread("results/PS00384/FDR-peaks/FDR.track.coverage.filtered.bed.gz")
+    df_list = list(
+        PS00381=PS00381,
+        PS00382=PS00382,
+        PS00383=PS00383,
+        PS00384=PS00384
+    )
+    MIN_COV=5
+}else{
+    GM12878 = fread("results/GM12878/FDR-peaks/FDR.track.coverage.filtered.bed.gz")
+    PS00338 = fread("results/PS00338_COLO829BL_1/FDR-peaks/FDR.track.coverage.filtered.bed.gz")
+    df_list = list(
+        GM12878=GM12878,
+        PS00338=PS00338
+    )
+    MIN_COV=30
+}
+
+AUO_samples = names(df_list)
+AUO_samples
+
+
+AUO_df = bind_rows(
+    df_list,
+    .id="sample"
+    ) %>%
+    rename(
+        `chrom` = `#chrom`
+    ) %>% 
+    filter(coverage_H1 > MIN_COV & coverage_H2 > MIN_COV) %>%
+    group_by(sample) 
+    
+has_all_pairs = all_peaks %>%
+    expand_grid(sample = AUO_samples) %>%
+    group_by(sample) %>%
+    bed_map(AUO_df,
+        fire_score_H1=max(score_H1),
+        fire_score_H2=max(score_H2),
+    ) %>%
+    pivot_wider(
+        names_from = sample, 
+        values_from = c(fire_score_H1, fire_score_H2)
+    ) %>%
+    mutate(total_score = rowSums(across(starts_with("fire_score_")), na.rm=T)) %>%
+    filter(!is.na(total_score), total_score>0) %>%
+    select(-total_score) %>%
+    drop_na()
+has_all_pairs
+```
+```{r}
+id_cols = names(head(has_all_pairs) %>% select(!starts_with("fire_score")))
+score_cols = names(head(has_all_pairs) %>% select(starts_with("fire_score")))
+name_pairs = t(combn(score_cols,2))
+#name_pairs = unique(rbind(name_pairs,name_pairs[,ncol(name_pairs):1]))
+name_pairs
+fire_pairs = list()
+for(idx in seq(nrow(name_pairs))){
+    name_1 = name_pairs[idx,1]
+    name_2 = name_pairs[idx,2]
+    cols = c(id_cols, name_1, name_2)
+    tdf = has_all_pairs %>%
+        select(all_of(cols)) %>%
+        filter(!if_any(everything(), is.na)) %>%
+        mutate(
+            s1 = name_1,
+            s2 = name_2
+        ) %>%
+        rename(
+            score_1 = name_1,
+            score_2 = name_2
+        ) %>%
+        separate(col = s1,into = c("a", "b", "hap_1", "sample_1")) %>%
+        separate(col = s2,into = c("b", "a", "hap_2", "sample_2")) %>%
+        select(-a,-b)
+
+    fire_pairs[[idx]] = tdf
+}
+fire_pairs = bind_rows(fire_pairs) %>%
+    arrange(chrom, start) %>%
+    mutate(
+        same_sample = sample_1 == sample_2,
+        group = floor(start/1e6)
+    )
+
+fire_pairs
+```
+
+```{r}
+library(runner)
+library(parallel)
+ws = 5e5
+
+roll_similarity = function(df, min_tests = 10){
+    a = min(df$start)
+    b = max(df$end)
+    n = nrow(df)
+    if(n < min_tests){
+        print(glue("{a} - {b}, n = {n}"))
+        return(NA)
+    }
+    cosine(df$score_1, df$score_2)[1]
+}
+
+cl <- makeForkCluster(16)
+n_windows = 100
+similarity_df = fire_pairs %>%
+    group_by(sample_1, hap_1, sample_2, hap_2) %>%
+    arrange(chrom, start, end) %>%
+    mutate(
+        similarity = runner(
+            .,
+            #k=ws, idx="start", lag=ws/2,
+            k = n_windows, lag = n_windows/2,
+            f = roll_similarity,
+            na_pad = NA,
+            cl=cl,
+        ),
+        group_start = lag(start, n_windows/2),
+        group_end = lead(end, n_windows/2),
+    ) %>% mutate(
+        color = case_when(
+            sample_1 == sample_2 ~ sample_1,
+            TRUE ~ "different"
+        )
+    ) %>%
+    drop_na() %>% 
+    arrange(sample_1, chrom, start, end) %>%
+    dplyr::group_by(sample_1, chrom, start, end) %>%
+    dplyr::arrange(-similarity) %>%
+    mutate(
+        rank = row_number(),
+    ) %>%
+    arrange(chrom,start,end,sample_1, -similarity) %>% 
+    ungroup()
+stopCluster(cl)
+similarity_df
+
+unique(similarity_df[c("chrom", "start", "end")])
+
+```
+
+```{r}
+similarity_df %>%
+    ggplot(
+        aes(
+            color=color,
+            alpha=same_sample,
+            group=paste0(sample_1,sample_2,hap_1,hap_2)),
+            size = same_sample,
+    ) +
+    geom_line(aes(y=similarity, x=start)) + 
+    geom_rug() +
+    scale_x_continuous("Genomic position", label=comma) + 
+    scale_alpha_manual("", values=c(0.35, 0.8)) +
+    scale_color_manual("", values=c("black", "red", "blue")) +
+    #facet_zoom(xlim = c(28510120, 33480577), zoom.size = 1) +
+    facet_col(~chrom)+ 
+    theme_cowplot() +
+    theme(legend.position="top")
+#my_ggsave("Figures/MHC-different-epi-haplotypes.pdf", width=22, height=8)
+my_ggsave("Figures/All-different-epi-haplotypes.pdf", width=22, height=22)
+```
+
+
+```{r}
+get_rank = function(z){
+    s = unique(z$sample_1)
+    is_s1 = z$sample_1 == s[1] | z$sample_2 == s[1]
+    is_s2 = z$sample_1 == s[2] | z$sample_2 == s[2]
+
+    rank1 = seq(nrow(z[is_s1,]))
+    rank2 = seq(nrow(z[is_s2,]))
+    z$rank[is_s1] = rank1
+    z$rank[is_s2] = rank2
+    z[z$same_sample,]
+}
+
+z=similarity_df %>% 
+    ungroup() %>%
+    arrange(chrom, start, end) %>%
+    dplyr::group_by(chrom, start, end) %>%
+    dplyr::arrange(-similarity) %>%
+    group_modify( ~ get_rank(.x)) %>%
+    #filter(same_sample, rank > 0)
+    as.tibble() 
+
+
+windows_100k = bed_makewindows(FAI[chrom %in% unique(similarity_df$chrom)], 1e5) %>% expand_grid(sample_1 = AUO_samples) %>% group_by(sample_1)
+windows_100k
+
+rank_100k = bed_map(windows_100k, z %>% group_by(sample_1),
+        max_rank=max(rank),
+        min_rank=min(rank),
+        mean_rank=mean(rank),
+        group_start=mean(group_start),
+        group_end=mean(group_end),
+
+    ) %>% bed_map(imprinted,
+        imprinted= n() > 0, 
+    ) %>%
+    mutate(chrom = factor(chrom, levels=unique(FAI$chrom))) %>%
+    replace_na(list(imprinted=F)) 
+
+# find the regions where both samples are at least rank 2
+both_rank_2 = rank_100k %>% 
+    drop_na() %>%
+    group_by(chrom, start, end, group_start, group_end) %>%
+    dplyr::summarize(
+        both_rank_2 = sum(mean_rank >= 2) == 2,
+        imprinted = sum(imprinted) > 0,
+        n = n()
+    ) %>%
+    bed_map(SDs,
+        is_SD = n() > 0
+    ) %>%
+    replace_na(
+        list(is_SD=F)
+    ) %>%
+    filter(both_rank_2) 
+
+both_rank_2 %>% 
+    dplyr::summarize(
+        SD = sum(is_SD),
+        NOT_SD = sum(!is_SD),
+        total = n(),
+        percent_SD = SD/total * 100, 
+    )
+
+rank_100k %>%
+    filter(mean_rank >= 2) %>%
+    dplyr::group_by(sample_1) %>% 
+    dplyr::summarize(
+        x = sum(end-start)/1e6
+    )
+seen_mbp = sum(both_rank_2$end - both_rank_2$start)/1e6
+seen_mbp
+expected_mbp = 32e6/3e9 * 40e6/3e9 * 3e9 * 1/1e6
+expected_mbp
+
+rank_100k %>%
+    replace_na(
+        list(mean_rank = 1,
+            min_rank = 1,
+            max_rank = 1,
+            group_start = 100,
+            group_end = 0,
+            imprinted = F
+        )
+    ) %>%
+    #filter(mean_rank > 0) %>%
+    #drop_na() %>%
+    ggplot(
+    ) +
+    #geom_point() +
+    geom_step(
+        aes(
+            color=sample_1,
+            group=sample_1,
+            #size = same_sample,
+            y=mean_rank-1, x=start,
+            alpha = mean_rank > 1,
+        ),
+    )+ 
+    geom_rect(
+        data = both_rank_2,
+        aes(xmin=start, xmax=end),
+        group=NA,
+        alpha=0.75,
+        fill="green",
+        ymin=0, ymax=4,
+    ) +
+    # add imprinted sites as orange rectangles
+    geom_rect(
+        data = rank_100k %>% filter(imprinted),
+        aes(xmin=start, xmax=end),
+        group=NA,
+        alpha=0.75,
+        fill="orange",
+        ymin=0, ymax=4,
+    ) +
+    scale_x_continuous("Genomic position", label=comma) + 
+    scale_y_continuous("# of inter-sample haplotypes with higher epigenetic similarity") +
+    scale_color_manual("", values=c("red", "blue")) +
+    scale_alpha_manual("", values=c(0.5, 0.75)) +
+    #facet_zoom(xlim = c(28510120, 33480577), zoom.size = 1) +
+    facet_col(~chrom) +
+    theme_minimal_grid()+
+    theme(legend.position="top")
+#my_ggsave("Figures/MHC-different-epi-haplotypes-rank.pdf", width=12, height=8)
+my_ggsave("Figures/All-different-epi-haplotypes-rank.pdf", width=12, height=22)
+
+both_rank_2 %>% 
+    fwrite("Tables/both-rank-2.bed", sep="\t", quote=F, na="NA")
+```
+
+
+
+
+# get the average rank of a window for 100kbp windows per sample
+```{r}
+rank_100k %>%
+    filter(mean_rank > 1) %>%
+    ggplot(
+        aes(x=mean_rank-1, weight = 1e5, fill=imprinted)
+    ) +
+    geom_histogram(binwidth=0.1) +
+    scale_y_continuous(
+        "bp",
+        #trans="log10",
+        #limits=c(4, NA),
+        label=comma
+    ) + #+ annotation_logticks(sides="l") +
+    theme_cowplot() +
+    facet_col(~sample_1) +
+    #coord_cartesian(ylim=c(0, 100e6)) +
+    scale_x_continuous(
+        "mean number of inter-sample haplotypes with higher epigenetic similarity\n(per 100kbp window)",
+    ) +
+    scale_fill_manual(
+        "Imprinted",
+        values=c("black", "darkorange")
+    ) +
+    #facet_zoom(ylim = c(0, 100e6)) +
+    theme(legend.position="top")
+my_ggsave("Figures/epi-haps-mean-rank-histogram.pdf", height=6, width=8)
+```
+
+```{r}
 ```

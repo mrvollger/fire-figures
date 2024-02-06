@@ -13,6 +13,37 @@ getmode <- function(v) {
    uniqv[which.max(tabulate(match(v, uniqv)))]
 }
 library(rlang)
+#library(gmm)
+# Load the package
+library(mclust)
+
+all_covs = fread("results/PS00357_COLO829T_1/FDR-peaks/FDR.track.bed.gz") %>%
+    # require 95% phasing
+    filter(
+        `#chrom` != "chrX",
+        `#chrom` != "chrY",
+    ) %>%
+    filter(coverage * 0.95 <= coverage_H1 + coverage_H2) %>%
+    filter(
+        pmin(coverage_H1, coverage_H2) > 1,
+    ) %>%
+    sample_n(1e6)
+model_cov = all_covs %>% filter(
+    coverage < 200,
+    coverage > 30
+)
+
+pdf("tmp.pdf")
+hist(model_cov$coverage_H1, breaks=100, xlim=c(0,100))
+hist(model_cov$coverage_H2, breaks=100, col="red", xlim=c(0,100))
+hist(model_cov$coverage, breaks=100, col="blue", xlim=c(0,100))
+hist(model_cov$coverage_H1 + model_cov$coverage_H2, breaks=100, col="blue", xlim=c(0,100))
+dev.off()
+nrow(fire)
+
+m = Mclust(c(model_cov$coverage_H1, model_cov$coverage_H2), G=seq(2))
+m$parameters$mean
+
 ```
 
 ```{r}
@@ -24,35 +55,30 @@ fire = fread("results/PS00357_COLO829T_1/FDR-peaks/FDR-FIRE-peaks.bed.gz") %>%
         `#chrom` != "chrX",
         `#chrom` != "chrY",
     ) %>%
-    filter(coverage * 0.95 <= coverage_H1 + coverage_H2) 
-nrow(fire)
-cov=getmode(fire$coverage)/2
-cov=getmode(fire$coverage_H1 + fire$coverage_H2)/2
-min_cov = cov - sd_range * sqrt(cov)
-max_cov = cov + sd_range * sqrt(cov)
-min_cov
-cov
-max_cov
-
-dup_cov = 2 * cov
-min_dup_cov = max(dup_cov - sd_range*sqrt(dup_cov) , max_cov)
+    filter(coverage * 0.95 <= coverage_H1 + coverage_H2) %>%
+    filter(
+        pmin(coverage_H1, coverage_H2) > 1,
+    )
 
 # make H1 the hap with more coverage always
-fire$swap = fire$coverage_H1 < fire$coverage_H2 
+fire$swap = fire$coverage_H1 > fire$coverage_H2 
 #tmp[R2 == val, c("R1", "R2") := .(R2, R1)]
 fire[swap==TRUE, c("coverage_H1", "coverage_H2") := .(coverage_H2, coverage_H1)]
 fire[swap==TRUE, c("fire_coverage_H1", "fire_coverage_H2") := .(fire_coverage_H2, fire_coverage_H1)]
 
+fire$class_H1 = predict(m, fire$coverage_H1)$classification
+fire$class_H2 = predict(m, fire$coverage_H2)$classification
+table(fire$class_H1)
+table(fire$class_H2)
+
 norm_vs_dup_df_wide = fire %>% 
-    filter(coverage_H1 >=coverage_H2) %>%
-    # require normal coverage
-    filter(coverage_H2 > min_cov & coverage_H2 < max_cov ) %>%
+    filter(coverage_H2 >=coverage_H1) %>%
     mutate(
-        is_dup=coverage_H1 > min_dup_cov
+        is_dup=(class_H1 == 1 & class_H2==2),
     ) %>%
     mutate(
-        percent_accessible_dup = 100*fire_coverage_H1 / coverage_H1,
-        percent_accessible_norm = 100*fire_coverage_H2 / coverage_H2,
+        percent_accessible_dup = 100*fire_coverage_H2 / coverage_H2,
+        percent_accessible_norm = 100*fire_coverage_H1 / coverage_H1,
     ) %>%
     mutate(
         norm_minus_dup = percent_accessible_norm - percent_accessible_dup 
@@ -82,8 +108,8 @@ norm_vs_dup_df %>%
     #geom_histogram(binwidth=2, position="identity", alpha=0.7) +
     geom_density(alpha=0.7) +
     scale_fill_manual("",
-        labels=c("Duplicated haplotype", "Normal haplotype"),
-        values=c("darkred", "skyblue"),
+        labels=rev(c("Duplicated haplotype", "Normal haplotype")),
+        values=rev(c("darkred", "skyblue")),
     ) +
     scale_x_continuous("Percent accessible", limits=c(0, 100)) +
     theme_minimal_grid() +
@@ -110,11 +136,11 @@ norm_vs_dup_df_coverage %>%
     ggplot(aes(fill=type, x=coverage_hap)) +
     geom_density(
         #aes(y = after_stat(scaled)),
-        alpha=0.7, adjust=0.6
+        alpha=0.75, adjust=0.3
     ) +
     scale_fill_manual("",
-        labels=c("Duplicated haplotype", "Normal haplotype"),
-        values=c("darkred", "skyblue"),
+        labels=rev(c("Duplicated haplotype", "Normal haplotype")),
+        values=rev(c("darkred", "skyblue")),
     ) +
     scale_x_continuous("Coverage", limits=c(0,100), breaks=seq(0,100,25)) +
     theme_minimal_grid() +
