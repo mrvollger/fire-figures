@@ -278,3 +278,82 @@ z=hg %>%
     theme(legend.position="top")
 my_ggsave("Figures/COLO-asm-mismatch-density.pdf", height=4, width=6)
 ```
+
+
+
+
+#
+# do hap specific peaks in BL change in Tumor
+#
+
+# data
+```{r}
+colo_hap_peaks = my_read_bed("results/PS00338_COLO829BL_1/hap1-vs-hap2/FIRE.hap.differences.bed") %>%
+    filter(p_adjust <= 0.05) 
+colo_t_peaks = my_read_bed("results/PS00357_COLO829T_1/FDR-peaks/FDR-FIRE-peaks.bed.gz") 
+
+colo_tumor_track = my_read_bed("results/PS00357_COLO829T_1/FDR-peaks/FDR.track.bed.gz") %>%
+    filter(coverage > 0, coverage_H1 > 0, coverage_H2>0) 
+
+colo_hap_peaks %>%
+    bed_map(colo_t_peaks,
+        t_peak = n() > 0,
+    ) %>%
+    replace_na(list(t_peak=FALSE)) %>%
+    filter(t_peak) 
+```
+
+# intersection + analysis
+```{r}
+tumor_cov = mean(colo_tumor_track$coverage)
+min_hap_cov = 10
+filtered_colo_tumor_track = colo_t_peaks %>%
+    filter(coverage_H1 > min_hap_cov, coverage_H2 > min_hap_cov) %>%
+    mutate(
+        hap1_per = fire_coverage_H1/coverage_H1,
+        hap2_per = fire_coverage_H2/coverage_H2,
+        diff = hap1_per - hap2_per, 
+    ) 
+sum(is.na(filtered_colo_tumor_track$diff))
+
+colo_compare_df = colo_hap_peaks %>%
+    bed_map(
+        filtered_colo_tumor_track, 
+        tumor_diff = diff[which.max(abs(diff))],
+    ) %>%
+    bed_map(
+        imprinted, 
+        is_imprinted = n()>0,
+    ) %>%
+    replace_na(list(is_imprinted=FALSE)) %>%
+    filter(!is.na(tumor_diff)) %>%
+    data.table()
+
+asdf = colo_compare_df %>%
+    select(chrom, start, end, diff, tumor_diff, is_imprinted) %>%
+    ggplot(aes(x=diff, y=tumor_diff, color=is_imprinted)) +
+    geom_abline(slope=1, intercept=0, color="red", linetype="dashed") +
+    geom_abline(slope=1, intercept=-0.25, color="gray", linetype="dashed") +
+    geom_abline(slope=1, intercept=0.25, color="gray", linetype="dashed") +
+    geom_point(alpha=0.75, size=0.5) +
+    geom_smooth(method="lm", se=FALSE, alpha=0.1, linewidth=0.1) +
+    stat_cor(size=2) + 
+    scale_y_continuous(
+        "Percent accessibility difference in tumor peaks\n(filtered for peaks with 10x coverage in both haplotypes)",
+        limits=c(-1,1), labels=percent) +
+    scale_x_continuous(
+        "Percent accessibility difference in blood haplotype-specific peaks",
+        limits=c(-1,1), labels=percent) +
+    scale_color_manual(
+        "Imprinted",
+        values=c("black", "darkorange"),
+    )+
+    # force equal aspect ratio
+    coord_fixed() +
+    theme_minimal_grid(font_size=6) +
+    theme(legend.position="top")
+my_ggsave("Figures/COLO-BL-Tumor-hap-peaks.pdf", height=3, width=3)
+```
+
+```{r}
+```

@@ -88,7 +88,17 @@ x = fire_df %>%
     filter(sum(count)>20) %>%
     mutate(
         percent=100*count/sum(count)
-    )
+    ) %>%
+    dplyr::group_by(encode_anno) %>%
+    mutate(
+        total_count=sum(count)
+    ) %>%
+    ungroup() %>%
+    arrange(total_count) %>%
+    mutate(
+        encode_anno=factor(encode_anno, levels=unique(encode_anno))
+    ) 
+x
 
 encode %>%
     group_by(component) %>%
@@ -275,7 +285,7 @@ my_ggsave("Figures/DNase-vs-FIRE.pdf", height=3, width=4)
 ```{r}
 z=fire_df %>% mutate(
         psize=end-start,
-        size_group = cut(psize, breaks=c(0,200,250,300,Inf)),
+        size_group = cut(psize, breaks=c(0,200,250,Inf)),
         size_group2=size_group,
     ) %>%
     filter(chrom != "chrX", chrom != "chrY", is_dnase_peak) %>%
@@ -315,7 +325,7 @@ my_ggsave("Figures/FIRE-peaks-percent-fire-vs-DNase.pdf", height=3, width=7)
 ```{r}
 fire_df %>% mutate(
         psize=end-start,
-        size_group = cut(psize, breaks=c(0,200,250,300,Inf)),
+        size_group = cut(psize, breaks=c(0,200,250,Inf)),
         size_group2=size_group,
     ) %>%
     filter(chrom != "chrX", chrom != "chrY") %>%

@@ -474,9 +474,9 @@ reverselog_trans <- function(base = exp(1)) {
 scientific_10 <- function(x) {
     is_one = as.numeric(x) == 1
     text = gsub("e", " %*% 10^", scales::scientific_format()(x))
-    print(text)
+    #print(text)
     text = str_remove(text, "^1 %\\*% ") # remove leading one 
-    print(text)
+    #print(text)
     text[is_one] = "10^0"
     rtn = parse(text=text)
     rtn

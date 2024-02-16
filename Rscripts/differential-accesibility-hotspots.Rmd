@@ -6,20 +6,8 @@ editor_options:
 ---
 
 ```{r}
-# get a fire peak data table called `df`
+# get data
 source("Rscripts/Fire-peak-df.R")
-FAI = fread("~/assemblies/hg38.analysisSet.chrom.sizes") %>%
-    filter(!grepl("_", V1))
-colnames(FAI) = c("chrom", "end")
-FAI$start= 0
-```
-
-
-```{r}
-SDs=my_read_bed("../FIREv2.0/workflow/annotations/SDs.merged.hg38.bed.gz")
-SD_size = sum(SDs$end - SDs$start)
-G_size = sum(FAI$end - FAI$start)
-SD_size/G_size
 ```
 
 ```{r}
@@ -34,6 +22,7 @@ f8 = "results/PS00272/hap1-vs-hap2/FIRE.hap.differences.bed"
 f9 = "results/PS00321/hap1-vs-hap2/FIRE.hap.differences.bed"
 f10 = "results/PS00327/hap1-vs-hap2/FIRE.hap.differences.bed"
 f11 = "results/UDN318336_PS00189/hap1-vs-hap2/FIRE.hap.differences.bed"
+f12 = "results/UDN633333_PS00115/hap1-vs-hap2/FIRE.hap.differences.bed"
 df1=my_read_bed(f1)
 df2=my_read_bed(f2)
 df3=my_read_bed(f3)
@@ -45,7 +34,9 @@ df8=my_read_bed(f8)
 df9=my_read_bed(f9)
 df10=my_read_bed(f10)
 df11=my_read_bed(f11)
-df = bind_rows(
+df12=my_read_bed(f12)
+
+df_all = bind_rows(
     list(
         GM12878=df1,
         PS00338=df2,
@@ -57,20 +48,30 @@ df = bind_rows(
         PS00272=df8,
         PS00321=df9,
         PS00327=df10,
-        UDN318336_PS00189=df11
+        UDN318336_PS00189=df11,
+        UDN633333_PS00115=df12
         ),
     .id="sample"
-) %>% mutate(p_value <= 0.05) %>%
+) %>% 
     bed_map(SDs,
         is_SD = n() > 0
     ) %>%
+    bed_map(ALTs,
+        is_Alt = n() > 0
+    ) %>%
+    bed_map(imprinted,
+        is_imprinted = n() > 0
+    ) %>%
     replace_na(
-        list(is_SD=F)
-    )
+        list(
+            is_SD=F,
+            is_Alt=F,
+            is_imprinted=F
+        )
+    ) %>%
+    data.table
 
-imprinted=my_read_bed("data/lcl_dmr_coordinates_Akbari.bed.gz")
-
-samples = unique(df$sample)
+samples = unique(df_all$sample)
 colors = c(
     "LCL"="darkgreen",
     "CD8+"="darkred",
@@ -89,34 +90,18 @@ sample_type = c(
     "PS00321"="Thyroid",
     "PS00327"="Thyroid",
     "PS00388"="Thyroid",
-    "UDN318336_PS00189"="Fibroblast"
+    "UDN318336_PS00189"="Fibroblast",
+    "UDN633333_PS00115"="Fibroblast"
 )
-df$sample_type = sample_type[df$sample]
-df$color = colors[df$sample_type]
-df
+df_all$sample_type = factor(sample_type[df_all$sample], levels=rev(names(colors)))
+df_all$color = colors[df_all$sample_type]
+df_all = df_all %>% arrange(sample_type, sample, chrom, start, end)
 
-df %>% 
-    #filter(p_adjust<=0.05) %>%
-    #group_by(sample) %>% 
-    dplyr::summarize(
-        SD = sum(is_SD),
-        NOT_SD = sum(!is_SD),
-        total = n(),
-        percent_SD = SD/total * 100,
-    )
+df = df_all %>%
+ filter(p_value <= 0.05) %>%
+ filter(abs(diff) >= 0.25) 
 ```
 
-```{r}
-df %>%
-    filter(`#chrom` != "chrX") %>%
-    filter(p_adjust <= 0.05) %>%
-    ggplot(
-        aes( y= `#chrom`, x = peak_start, color=sample)
-    )+
-    geom_density_ridges2() +
-    theme_minimal_grid()
-my_ggsave("tmp.pdf")
-```
 
 ```{r}
 system("rm tmp.pdf")
@@ -154,11 +139,10 @@ for(idx in seq(4)){
         ws = 1e4
     }
 
-    tdf=df[p_value <= 0.05 & `#chrom` %in% c] %>%
-        group_by(sample_type) %>%
-        arrange(sample, .by_group=T)
+    tdf=df[p_value <= 0.05 & `chrom` %in% c] %>%
+        arrange(sample_type, sample, .by_group=T)
 
-    gr = GRanges(seqnames=tdf$`#chrom`, IRanges(start=tdf$peak_start, end=tdf$peak_end))
+    gr = GRanges(seqnames=tdf$`chrom`, IRanges(start=tdf$start, end=tdf$end))
     imprinted_gr = GRanges(imprinted[chrom %in% c])
 
     if(length(c) == 1){
@@ -180,7 +164,7 @@ for(idx in seq(4)){
         ttdf = tdf[cond,]
         st = ttdf[[grouping_var]][[1]]
         color = ttdf$color[[1]]
-        sample.regions = GRanges(seqnames=ttdf$`#chrom`, IRanges(start=ttdf$peak_start, end=ttdf$peak_end))
+        sample.regions = GRanges(seqnames=ttdf$`chrom`, IRanges(start=ttdf$start, end=ttdf$end))
         
         tkp = kpPlotDensity(
             kp, data=sample.regions, 
@@ -207,13 +191,9 @@ for(idx in seq(4)){
     }
 }
 
-
-
-
 dev.off()
 system("cp tmp.pdf Figures/differential-peaks-ideogram.pdf")
 dev.off()
-
 ```
 
 
@@ -339,7 +319,6 @@ fire_pairs = bind_rows(fire_pairs) %>%
         same_sample = sample_1 == sample_2,
         group = floor(start/1e6)
     )
-
 fire_pairs
 ```
 
@@ -394,7 +373,6 @@ stopCluster(cl)
 similarity_df
 
 unique(similarity_df[c("chrom", "start", "end")])
-
 ```
 
 ```{r}
@@ -456,8 +434,16 @@ rank_100k = bed_map(windows_100k, z %>% group_by(sample_1),
     ) %>% bed_map(imprinted,
         imprinted= n() > 0, 
     ) %>%
+    bed_map(ALTs,
+        is_Alt = n() > 0
+    ) %>%
     mutate(chrom = factor(chrom, levels=unique(FAI$chrom))) %>%
-    replace_na(list(imprinted=F)) 
+    replace_na(
+        list(
+            imprinted=F,
+            is_Alt=F
+        )
+    ) 
 
 # find the regions where both samples are at least rank 2
 both_rank_2 = rank_100k %>% 
@@ -466,6 +452,7 @@ both_rank_2 = rank_100k %>%
     dplyr::summarize(
         both_rank_2 = sum(mean_rank >= 2) == 2,
         imprinted = sum(imprinted) > 0,
+        is_Alt = sum(is_Alt) > 0,
         n = n()
     ) %>%
     bed_map(SDs,
@@ -475,7 +462,8 @@ both_rank_2 = rank_100k %>%
         list(is_SD=F)
     ) %>%
     filter(both_rank_2) 
-
+table(both_rank_2$is_Alt)
+table(both_rank_2$is_SD)
 both_rank_2 %>% 
     dplyr::summarize(
         SD = sum(is_SD),
@@ -546,11 +534,98 @@ rank_100k %>%
     theme(legend.position="top")
 #my_ggsave("Figures/MHC-different-epi-haplotypes-rank.pdf", width=12, height=8)
 my_ggsave("Figures/All-different-epi-haplotypes-rank.pdf", width=12, height=22)
-
-both_rank_2 %>% 
-    fwrite("Tables/both-rank-2.bed", sep="\t", quote=F, na="NA")
 ```
 
+# check if we have more overlap than expected with SDs or ALTs
+```{r}
+merged_both_rank2 = bed_merge(both_rank_2, max_dist=1e5+1,
+    is_SD = sum(is_SD)>0, is_Alt = sum(is_Alt)>0, is_imprinted = sum(imprinted)>0,
+) %>% mutate(
+    group="observed",
+)
+merged_both_rank2
+
+merged_both_rank2 %>% 
+    fwrite("Tables/both-rank-2.bed", sep="\t", quote=F, na="NA")
+
+
+random_windows = merged_both_rank2 %>%
+    select(chrom, start, end) %>%
+    expand_grid(
+        group = paste("null group x", seq(10000)),
+    ) %>%
+    bed_shuffle(FAI %>% filter(!name %in% c("chrM", "chrEBV", "chrX", "chrY")), seed = 9830491) %>%
+    bed_map(SDs, is_SD = n() > 0) %>% 
+    bed_map(ALTs, is_Alt = n() > 0) %>% 
+    bed_map(imprinted, is_imprinted = n() > 0) %>%
+    replace_na(list(is_SD=F, is_Alt=F, is_imprinted=F)) 
+random_windows
+
+null_both_rank2 = bind_rows(random_windows, merged_both_rank2) %>%
+    group_by(group) %>%
+    dplyr::summarize(
+        SD = mean(is_SD), 
+        Alt = mean(is_Alt)
+    ) %>%
+    mutate(
+        observed = case_when(
+            group == "observed" ~ "observed",
+            TRUE ~ "10,000 random shuffles (null distribution)"
+        )
+    )
+
+null_both_rank2 %>%
+    pivot_longer(
+        cols = c(Alt, SD),
+        names_to = "type",
+        values_to = "value"
+    ) %>%
+    ggplot(aes(x=value, fill=observed, color=observed)) +
+    geom_histogram(
+        data = . %>% filter(observed != "observed"),
+        binwidth=0.001
+    ) +
+    geom_vline(
+        data = . %>% filter(observed == "observed"),
+        aes(xintercept=value, color=observed),
+        linetype="dashed",
+    ) + 
+    geom_text(
+        data = . %>% filter(observed == "observed"),
+        aes(y=0, label=percent(value, accuracy=0.01)),
+        nudge_x = 0.075,
+        nudge_y = 2000,
+    ) +
+    #geom_density(alpha=0.5) +
+    scale_fill_manual("", values=c("black", "darkorange")) +
+    scale_color_manual("", values=c("black", "darkorange")) +
+    scale_x_continuous(
+        "Percent of windows with overlap",
+        labels=percent,
+    ) +
+    scale_y_continuous(
+        "Number of randomizations",
+    ) +
+    theme_minimal_grid(font_size=8) +
+    facet_col(~type) +
+    theme(legend.position="top")
+
+null_both_rank2 %>%
+    pivot_longer(
+        cols = c(Alt, SD),
+        names_to = "type",
+        values_to = "value"
+    ) %>%
+    group_by(type) %>%
+    dplyr::summarize(
+        z = 1 - mean(value[observed=="observed"] > value[observed!="observed"]),
+        x=value[observed=="observed"], 
+    )
+     
+
+my_ggsave("Figures/Overlap-with-alts-or-SDs-for-inter-hap-ranks.pdf", width=4, height=3)
+table(null_both_rank2$average_alt_overlap)
+```
 
 
 
@@ -583,5 +658,152 @@ rank_100k %>%
 my_ggsave("Figures/epi-haps-mean-rank-histogram.pdf", height=6, width=8)
 ```
 
+
+
+
+
+
+
+#
+# test for enrichment of hap specific peaks in windows
+#
 ```{r}
+library(runner)
+library(parallel)
+
+roll_enrichment_test_df = function(d){
+    tn_all_peaks = d$tn_all_peaks[1]
+    tn_hap_peaks = d$tn_hap_peaks[1]
+    tn_not_hap_peaks = tn_all_peaks - tn_hap_peaks
+    n_all_peaks = nrow(d)
+    n_hap_peaks = sum((d$p_value <= 0.05) & (abs(d$diff) > 0.25))
+    n_not_hap_peaks = n_all_peaks - n_hap_peaks
+    p_value = fisher.test(
+        matrix(c(n_hap_peaks, n_not_hap_peaks, tn_hap_peaks, tn_not_hap_peaks),nrow=2),
+        alternative="greater"
+    )$p.value
+    z=data.table(
+        chrom = d$chrom[1],
+        start = min(d$start),
+        end = max(d$end),
+        p_value = p_value,
+        n_hap_peaks = n_hap_peaks,
+        n_not_hap_peaks = n_not_hap_peaks,
+        tn_hap_peaks = tn_hap_peaks,
+        tn_all_peaks = tn_all_peaks,
+        sample_type = d$sample_type[1]
+    )
+    z
+}
+
+n_in_w = 100
+group_var = "sample_type"
+zz = df_all %>%
+    filter(chrom %in% FAI_NO_SEX$name) %>%
+    dplyr::group_by(get(group_var)) %>%
+    mutate(
+        tn_hap_peaks = sum((p_value <= 0.05) & (abs(diff) >= 0.25)),
+        tn_all_peaks = n(),
+    ) %>%
+    dplyr::arrange(get(group_var), chrom, start, end, .by_group = TRUE) %>%
+    mutate(
+        idx = seq(1, n()),
+    ) %>%
+    data.table
+table(zz[,c("tn_hap_peaks", "tn_all_peaks")])
+
+cl <- makeForkCluster(16)
+idxs = seq(n_in_w/2, nrow(zz), n_in_w/10)
+k = runner(
+    zz, 
+    k = n_in_w, lag = -n_in_w/2,
+    f = roll_enrichment_test_df,
+    at = idxs,
+    #na_pad = NA,
+    cl=cl,
+)
+stopCluster(cl)
+a = data.table(t(k)) %>%
+    unnest() %>%
+    filter(start < end) %>%
+    filter(!is.na(p_value)) %>%
+    ungroup() %>%
+    mutate(
+        p_adjust = p.adjust(p_value, method="fdr"),
+        my_group = get(group_var),
+    ); a
+head(a$p_value)
 ```
+
+```{r}
+ttz=df_all %>%
+    filter(p_value <= 0.05) %>%
+    ggplot(aes(x=abs(diff), color=sample_type, group=sample)) + 
+    geom_vline(xintercept=0.25, linetype="dashed") +
+    geom_histogram() +
+    facet_col(~sample_type)+
+    theme_cowplot()
+my_ggsave("tmp.pdf")
+```
+
+```{r}
+to_use=a
+#roll_windowed_hap_peaks %>% filter(p_adjust < 0.05) %>% filter(chrom == "chr6") %>% select(chrom, group_start, group_end, p_value, p_adjust, my_group, n_hap_peaks, n_all_peaks)
+
+y_lim = ceil(max(-log10(to_use$p_value))) 
+y_by = floor(y_lim/5)
+z=to_use %>%
+    mutate(
+        # strip chr from chrom names
+        chrom = factor(gsub("chr", "", chrom), levels=1:22),
+        #chrom = factor(chrom, levels=FAI_NO_SEX$chrom),
+    ) %>%
+    #filter(p_value < 0.05) %>%
+    ggplot(
+        aes(x=(
+            end+start)/2,
+            y=p_value,
+            color=p_adjust < 0.05,
+            alpha=p_adjust < 0.05,
+        )
+    ) +
+    geom_rect(
+        data = data.table(
+            start=0,end=0,p_value=1,color=NULL,
+            xmin=28510120, xmax=33480577, chrom=factor("6"), ymin=1, ymax=10**-y_lim
+        ),
+        aes(xmin=xmin, xmax=xmax, ymin=ymin, ymax=ymax, color=NULL),
+        alpha=0.25,
+        fill="blue",
+    ) +
+    geom_hline(
+        data = . %>% dplyr::group_by(my_group) %>% filter(p_adjust<0.05) %>% dplyr::summarize(y = max(p_value)),
+        aes(yintercept=y),
+        linetype="dashed",
+        linewidth=0.1,
+    )+
+    geom_point(size=0.25) +
+    facet_grid(my_group~chrom, space="free_x", scale="free") +
+    scale_x_continuous("Genomic position (Mbp)", 
+        breaks = seq(0, 300e6, 50e6),
+        label=function(x) comma(x/1e6)
+    ) +
+    scale_color_manual("Corrected p-value < 0.05", values=c("black", "red")) +
+    scale_alpha_manual("Corrected p-value < 0.05", values=c(0.05, 1)) +
+    scale_y_continuous("p-value",
+        trans=reverselog_trans(base=10),
+        breaks=10**(-seq(0, y_lim, y_by)),
+        minor_breaks=10**(-seq(0, y_lim, 0.1)),
+        labels=scientific_10,
+    ) +
+    theme_cowplot(font_size=6) +
+    theme(
+        legend.position="top",
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+        strip.clip = "off",
+        strip.background =element_rect(fill="white"),
+        #strip.text.x = element_text(size = 4, color = "black")
+    ) 
+my_ggsave("Figures/epi-haps-binom.pdf", width=8, height=3)
+```
+

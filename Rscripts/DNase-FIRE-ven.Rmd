@@ -1,0 +1,48 @@
+```{r}
+source("Rscripts/Fire-peak-df.R")
+```
+
+
+```{r}
+unreliable_df = my_read_bed("results/GM12878/coverage/unreliable-coverage-regions.bed.gz") %>% bed_merge()
+
+data_for_ven = dnase_peaks %>%
+    bed_merge() %>%
+    mutate(
+        call="DNase"
+    ) %>%
+    bind_rows(
+        fire_df %>%
+            select(chrom, start, end) %>%
+            mutate(
+                call="Fire"
+            )
+    ) %>%
+    bed_map(
+        unreliable_df,
+        is_unreliable = n() > 0 
+    ) %>%
+    bed_map(
+        SDs,
+        is_SD = n() > 0
+    ) %>%
+    bed_map(
+        dnase_peaks,
+        is_dnase_peak = n() > 0
+    ) %>%
+    replace_na(
+        list(is_unreliable = FALSE, is_SD = FALSE, is_dnase_peak = FALSE)
+    ) %>%
+    data.table()
+
+
+
+n_dnase_peaks = data_for_ven %>% filter(call == "DNase", !is_unreliable, !is_SD) %>% nrow()
+n_fire_peaks = data_for_ven %>% filter(call == "Fire", !is_SD) %>% nrow()
+n_shared_peaks = data_for_ven %>% filter(call=="Fire", is_dnase_peak, !is_SD) %>% nrow()
+n_fire_only = n_fire_peaks - n_shared_peaks
+n_dnase_only = n_dnase_peaks - n_shared_peaks
+
+
+print(glue("n_fire_peaks: {n_fire_peaks}\nn_dnase_peaks: {n_dnase_peaks}\nn_shared_peaks: {n_shared_peaks}\nn_fire_only: {n_fire_only}\nn_dnase_only: {n_dnase_only}"))
+```
