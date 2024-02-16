@@ -492,3 +492,20 @@ my_read_bed = function(...){
     df
 }
 
+logit_e = function(x, a=1, b=0) {
+    z=x**exp(1)
+    log(z/(1-z))
+}
+
+
+anti_logit_e = function(x, a=1, b=0) {
+    z=exp(b)*x**a
+    (z/(1+z))**exp(-1)
+}
+
+trans_anti_logit_e <- trans_new(
+  name      = "trans_anti_logit_e",
+  transform = anti_logit_e,
+  inverse   = logit_e,
+  #domain    = c(-Inf, Inf)
+)

@@ -1,7 +1,7 @@
 source("Rscripts/utils.R")
 library(regioneR)
 library(BSgenome.Hsapiens.UCSC.hg38)
-if(T){
+if(F){
     FAI = fread("~/assemblies/hg38.analysisSet.chrom.sizes") %>%
         filter(!grepl("_", V1))
     colnames(FAI) = c("chrom", "end")
@@ -14,21 +14,23 @@ if(T){
     FAI_NO_SEX
 
     # annotations 
+    unreliable_df = my_read_bed("results/GM12878/coverage/unreliable-coverage-regions.bed.gz") %>% bed_merge()
+    blacklist_df = my_read_bed("data/encode_blacklist_ENCFF356LFX.bed.gz") %>% bed_merge()
     imprinted=my_read_bed("data/lcl_dmr_coordinates_Akbari.bed.gz")
-    ALTs = my_read_bed("data/GRCh38-alt-locations.bed")
+    ALTs = my_read_bed("data/GRCh38-alt-locations.bed.gz")
     sds=my_read_bed("data/SDs.merged.hg38.bed.gz")
     SDs=sds
     SD_size = sum(SDs$end - SDs$start)
     G_size = sum(FAI$end - FAI$start)
     encode=my_read_bed("data/ENCODE3_consensus_DHS_ENCFF503GCK.tsv.gz")
-    tss=my_read_bed("data/gencode.v42.annotation_TSS.gff3")
+    tss=my_read_bed("data/gencode.v42.annotation_TSS.gff3.gz")
  
     # data 
     dnase_peaks=my_read_bed("../phased-fdr-and-peaks/data/ENCFF762CRQ_DNase_peaks.bed.gz")
     dnase=my_read_bed("../phased-fdr-and-peaks/data/bedgraph_annotations/ENCFF960FMM_dnase_signal.bed")
     colnames(dnase)[4] = "dnase_sig"
     
-    atac_peaks = my_read_bed("../phased-fdr-and-peaks/scATAC/10X_GM12878_peaks_max_cov.bed")
+    atac_peaks = my_read_bed("data/10X_GM12878_peaks_max_cov.bed.gz")
     atac = my_read_bed("../phased-fdr-and-peaks/data/ATAC/10X_GM12878_aggr_scATAC.bg.gz")
     colnames(atac)[4] = "atac_sig"
 

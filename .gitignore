@@ -1,3 +1,11 @@
 Rplots.pdf
 tmp.pdf
+*pdf
+Figures/Tables/*
+results
+Tables
+data
+temp
+phasing-and-variant-calling
+Rdata
 

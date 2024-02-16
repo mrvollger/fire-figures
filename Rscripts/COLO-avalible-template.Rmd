@@ -132,7 +132,7 @@ my_ggsave("Figures/COLO-available-template-diff.pdf")
 
 # plot the coverage of the duplicated haplotype vs the normal haplotype
 norm_vs_dup_df_coverage %>%
-    filter(is_dup) %>%
+    #filter(is_dup) %>%
     ggplot(aes(fill=type, x=coverage_hap)) +
     geom_density(
         #aes(y = after_stat(scaled)),
@@ -144,6 +144,7 @@ norm_vs_dup_df_coverage %>%
     ) +
     scale_x_continuous("Coverage", limits=c(0,100), breaks=seq(0,100,25)) +
     theme_minimal_grid() +
+    facet_col(~is_dup) + 
     theme(legend.position="top")
 my_ggsave("Figures/COLO-available-template-total-coverage.pdf") 
 
@@ -292,8 +293,8 @@ colo_hap_peaks = my_read_bed("results/PS00338_COLO829BL_1/hap1-vs-hap2/FIRE.hap.
     filter(p_adjust <= 0.05) 
 colo_t_peaks = my_read_bed("results/PS00357_COLO829T_1/FDR-peaks/FDR-FIRE-peaks.bed.gz") 
 
-colo_tumor_track = my_read_bed("results/PS00357_COLO829T_1/FDR-peaks/FDR.track.bed.gz") %>%
-    filter(coverage > 0, coverage_H1 > 0, coverage_H2>0) 
+#colo_tumor_track = my_read_bed("results/PS00357_COLO829T_1/FDR-peaks/FDR.track.bed.gz") %>%
+ #   filter(coverage > 0, coverage_H1 > 0, coverage_H2>0) 
 
 colo_hap_peaks %>%
     bed_map(colo_t_peaks,
@@ -305,7 +306,7 @@ colo_hap_peaks %>%
 
 # intersection + analysis
 ```{r}
-tumor_cov = mean(colo_tumor_track$coverage)
+#tumor_cov = mean(colo_tumor_track$coverage)
 min_hap_cov = 10
 filtered_colo_tumor_track = colo_t_peaks %>%
     filter(coverage_H1 > min_hap_cov, coverage_H2 > min_hap_cov) %>%
@@ -331,12 +332,24 @@ colo_compare_df = colo_hap_peaks %>%
 
 asdf = colo_compare_df %>%
     select(chrom, start, end, diff, tumor_diff, is_imprinted) %>%
+    mutate(
+        diff_diffs = abs(diff - tumor_diff),
+        large_t_diff = diff_diffs > 0.75,
+    ) %>%
     ggplot(aes(x=diff, y=tumor_diff, color=is_imprinted)) +
     geom_abline(slope=1, intercept=0, color="red", linetype="dashed") +
     geom_abline(slope=1, intercept=-0.25, color="gray", linetype="dashed") +
     geom_abline(slope=1, intercept=0.25, color="gray", linetype="dashed") +
     geom_point(alpha=0.75, size=0.5) +
     geom_smooth(method="lm", se=FALSE, alpha=0.1, linewidth=0.1) +
+    geom_text_repel(
+        data = . %>% filter(large_t_diff),
+        aes(
+            label=paste0(chrom, ":", start, "-", end),
+        ),
+        size = 1,
+        min.segment.length = 0,
+    ) + 
     stat_cor(size=2) + 
     scale_y_continuous(
         "Percent accessibility difference in tumor peaks\n(filtered for peaks with 10x coverage in both haplotypes)",
@@ -353,7 +366,4 @@ asdf = colo_compare_df %>%
     theme_minimal_grid(font_size=6) +
     theme(legend.position="top")
 my_ggsave("Figures/COLO-BL-Tumor-hap-peaks.pdf", height=3, width=3)
-```
-
-```{r}
 ```
