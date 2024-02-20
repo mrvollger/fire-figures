@@ -4,18 +4,17 @@ source("Rscripts/Fire-peak-df.R")
 ```
 
 ```{r}
-vcf="/mmfs1/gscratch/stergachislab/mvollger/projects/k-mer-variant-phasing/results/GM12878/hiphase/GM12878.vcf.gz"
-vcf_df_raw = fread(cmd=glue("bcftools view -f 'PASS' -i 'GT=\"HET\"' {vcf} | grep -v ^##"))
-```
-
-```{r}
-set.seed(1) 
-vcf_df = vcf_df_raw %>% 
+vcf="data/GM12878.vcf.gz"
+vcf_df = fread(cmd=glue("bcftools view -f 'PASS' -i 'GT=\"HET\"' {vcf} | grep -v ^##"))  %>% 
     mutate(start = POS-1) %>%
     rename(
         chrom="#CHROM",
         end=POS
     )
+```
+
+```{r}
+set.seed(1) 
 nrow(vcf_df)/1e6
 
 hap_peaks=my_read_bed("results/GM12878/hap1-vs-hap2/FIRE.hap.differences.bed") %>%
@@ -101,12 +100,12 @@ hap_peaks_with_null %>%
     ) +
     ggtitle(glue(
     "Fisher's exact one-sided p-value: {p_sum$p_value}\n",
-    "real: with {p_sum$n_with_variants_real} without {p_sum$n_without_variants_real};   ",
-    "shuffle: with {p_sum$n_with_variants_shuffle} without {p_sum$n_without_variants_shuffle}"
-    ), font_size=1) +
+    "Real data: with {p_sum$n_with_variants_real} without {p_sum$n_without_variants_real};   ",
+    "Shuffled data: with {p_sum$n_with_variants_shuffle} without {p_sum$n_without_variants_shuffle}"
+    )) +
     theme(
         legend.position="top",
-        plot.title = element_text(size = 8, face = "bold"),
+        plot.title = element_text(size = 5, face = "bold"),
     ) 
 
 my_ggsave("Figures/n-variants-per-hap-peak.pdf", height=3, width=3)
