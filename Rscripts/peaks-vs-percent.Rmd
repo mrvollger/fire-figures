@@ -98,7 +98,21 @@ x = fire_df %>%
     mutate(
         encode_anno=factor(encode_anno, levels=unique(encode_anno))
     ) 
-x
+
+keep_annos = c("Lymphoid", "Tissue invariant", "Stromal B", "Primitive / embryonic", "Myeloid / erythroid")
+fire_df %>% 
+    separate_rows(encode_anno, sep=";") %>%
+    mutate(
+        encode_anno = case_when(
+            encode_anno %in% keep_annos ~ encode_anno,
+            TRUE ~ "Other"
+        )
+    ) %>%
+    group_by(encode_anno) %>%
+    summarise(
+        count=n(),
+        percent = count / nrow(fire_df) * 100 
+    ) 
 
 encode %>%
     group_by(component) %>%
@@ -288,12 +302,15 @@ z=fire_df %>% mutate(
         size_group = cut(psize, breaks=c(0,200,250,Inf)),
         size_group2=size_group,
     ) %>%
+    filter(!is_unreliable, !is_blacklist, !is_SD) %>%
     filter(chrom != "chrX", chrom != "chrY", is_dnase_peak) %>%
     filter(dnase_max > 0) %>%
-    pivot_longer(starts_with("dnase_max")) %>%
+    tidyr::pivot_longer(starts_with("dnase_max")) %>%
     #filter(dnase_max>0.3) %>%
-    group_split(name,size_group) %>% 
-    map(
+    filter(!grepl("gc_corrected", name)) %>%
+    #filter(dnase_max>0.3) %>%
+    group_split(is_ctcf_peak, size_group) %>% 
+    purrr::map(
         ~ggplot(., aes(x=value, y=acc_percent)) +
             geom_hex(bins=50) + 
             #geom_smooth(se=F, method="lm", linetype="dashed", size=1)+
@@ -316,7 +333,7 @@ z=fire_df %>% mutate(
                 aspect.ratio=1,
             )
     ) %>% 
-    plot_grid(plotlist = ., align = 'hv', ncol = 4)
+    plot_grid(plotlist = ., align = 'hv', ncol = 3)
         
 my_ggsave("Figures/FIRE-peaks-percent-fire-vs-DNase.pdf", height=3, width=7)
 ```
@@ -328,12 +345,14 @@ fire_df %>% mutate(
         size_group = cut(psize, breaks=c(0,200,250,Inf)),
         size_group2=size_group,
     ) %>%
+    filter(!is_unreliable, !is_blacklist, !is_SD) %>%
     filter(chrom != "chrX", chrom != "chrY") %>%
-    filter(atac_max > 100) %>%
+    filter(atac_max > 1) %>%
     pivot_longer(starts_with("atac_max")) %>%
+    filter(!grepl("gc_corrected", name)) %>%
     #filter(dnase_max>0.3) %>%
-    group_split(name,size_group) %>% 
-    map(
+    group_split(is_ctcf_peak & ! is_dnase_peak, size_group) %>% 
+    purrr::map(
         ~ggplot(., aes(x=value, y=acc_percent)) +
             geom_hex(bins=50) + 
             #geom_smooth(se=F, method="lm", linetype="dashed", size=1)+
@@ -356,7 +375,7 @@ fire_df %>% mutate(
                 aspect.ratio=1,
             )
     ) %>% 
-    plot_grid(plotlist = ., align = 'hv', ncol = 4)
+    plot_grid(plotlist = ., align = 'hv', ncol = 3)
         
 my_ggsave("Figures/FIRE-peaks-percent-fire-vs-ATAC.pdf", height=3, width=7)
 ```

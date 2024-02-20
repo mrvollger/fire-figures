@@ -20,17 +20,21 @@ if(F){
     ALTs = my_read_bed("data/GRCh38-alt-locations.bed.gz")
     sds=my_read_bed("data/SDs.merged.hg38.bed.gz")
     SDs=sds
+    SDs_all = fread("data/SDs.bed.gz")
+    colnames(SDs_all)[1:4] = c("bin", "chrom", "start", "end")
     SD_size = sum(SDs$end - SDs$start)
     G_size = sum(FAI$end - FAI$start)
     encode=my_read_bed("data/ENCODE3_consensus_DHS_ENCFF503GCK.tsv.gz")
     tss=my_read_bed("data/gencode.v42.annotation_TSS.gff3.gz")
+    cage_df = my_read_bed("data/GM12878_cage_peaks_merged.bed.gz")
  
     # data 
-    dnase_peaks=my_read_bed("../phased-fdr-and-peaks/data/ENCFF762CRQ_DNase_peaks.bed.gz")
+    dnase_peaks=my_read_bed("data/ENCFF762CRQ_DNase_peaks.bed.gz")
     dnase=my_read_bed("../phased-fdr-and-peaks/data/bedgraph_annotations/ENCFF960FMM_dnase_signal.bed")
     colnames(dnase)[4] = "dnase_sig"
     
-    atac_peaks = my_read_bed("data/10X_GM12878_peaks_max_cov.bed.gz")
+    #atac_peaks = my_read_bed("data/10X_GM12878_peaks_max_cov.bed.gz")
+    atac_peaks = my_read_bed("data/scATAC_GM12878_peaks_MACS2.bed.gz")
     atac = my_read_bed("../phased-fdr-and-peaks/data/ATAC/10X_GM12878_aggr_scATAC.bg.gz")
     colnames(atac)[4] = "atac_sig"
 
@@ -73,8 +77,32 @@ if(F){
         ) %>%
         bed_map(imprinted, imprinted=(length(V4) > 0)) %>%
         bed_map(atac, atac_max = max(atac_sig)) %>%
+        bed_map(
+            unreliable_df,
+            is_unreliable = n()>0,
+        ) %>%
+        bed_map(
+            blacklist_df,
+            is_blacklist = n()>0,
+        ) %>%
+        bed_map(
+            ALTs,
+            is_alt = n()>0,
+        ) %>%
+        bed_map(
+            SDs,
+            is_SD = n()>0,
+        ) %>%
+        bed_map(
+            cage_df,
+            is_cage_peak = n()>0,
+        ) %>%
         bed_map(atac_peaks, 
             is_atac_peak = n()>0,
+        ) %>%
+        bed_map(
+            SDs_all,
+            SD_max_frac_match = max(fracMatch),
         ) %>%
         replace_na(
             list(
@@ -83,7 +111,12 @@ if(F){
                 TSS=0,
                 is_atac_peak=F,
                 is_ctcf_peak=F,
-                imprinted=F
+                imprinted=F,
+                is_alt=F,
+                is_SD=F,
+                is_blacklist=F,
+                is_cage_peak=F,
+                is_unreliable=F
             )
         ) %>%
         arrange(-acc_percent, -n) %>%

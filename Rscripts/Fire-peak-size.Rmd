@@ -11,6 +11,9 @@ source("Rscripts/Fire-peak-df.R")
 ```
 
 ```{r}
+pm = mean(fire_df$psize)
+ps = sd(fire_df$psize)
+
 z=fire_df %>%
     select(psize,group) %>%
     filter(psize<1000, psize>50) %>%
@@ -24,21 +27,26 @@ z=fire_df %>%
         trans="log10",
         label=comma,
     ) +   # for both axes to remove unneeded padding
+    ggtitle(glue("Mean peak size: {round(pm,1)} bp, SD: {round(ps,1)} bp")) +
     annotation_logticks(side="b")+
     coord_cartesian(clip = "off") + # to avoid clipping of the very top of the top ridgeline
     #theme_ridges() 
     my_hgrid()
 my_ggsave("Figures/FIRE-peak-size.pdf", width=3, height=3)
 
-mean(fire_df$psize)
-sd(fire_df$psize)
-
 ```
 
 ```{r}
 sd_df = fire_df %>% 
-    select(FIRE_start_ssd, FIRE_end_ssd, group) %>%
-    pivot_longer(cols=c(FIRE_start_ssd, FIRE_end_ssd), names_to="start_end", values_to="sd") 
+    select(FIRE_start_ssd, FIRE_end_ssd, group, is_ctcf_peak, TSS, is_cage_peak) %>%
+    pivot_longer(
+        cols=c(FIRE_start_ssd, FIRE_end_ssd),
+        names_to="start_end",
+        values_to="sd"
+    ) %>%
+    mutate(
+        is_TSS = TSS > 0
+    )
 sd_df %>% 
     group_by(start_end) %>%
     dplyr::summarize(
@@ -61,6 +69,7 @@ z=sd_df %>%
         label=comma,
     ) +   # for both axes to remove unneeded padding
     annotation_logticks(side="b")+
+    ggtitle(glue("Mean: {round(mean(sd_df$sd),1)} bp"))+
     #facet_col(~start_end)+
     coord_cartesian(xlim=c(10,1000))+
     my_hgrid()
@@ -68,3 +77,39 @@ my_ggsave("Figures/FIRE-peak-size-std-dev.pdf", width=3, height=2)
 ```
 
 On average FIRE peaks are 208.9 bp long with a standard deviation of 67.7 bp; however, the elements of accessibility underlying these peaks will also vary in their start and end positions compared to the peak (standard deviation of 83.3 bp). 
+
+
+
+```{r}
+my_comparisons = list(
+    c("TRUE FALSE", "FALSE TRUE")
+)
+
+z=sd_df %>%
+  ggplot(aes(y=sd+1, x = paste(is_ctcf_peak, is_TSS))) + 
+    geom_violin()+
+    #geom_text(
+    #    data = data.frame(x=mean(sd_df$sd), y=1000, label="Mean"),
+    #    aes(x=x, y=y, label=comma(x)),
+    #) +
+    geom_text(
+        data = . %>% group_by(is_ctcf_peak, is_TSS, is_cage_peak) %>% dplyr::summarize(mean=mean(sd), n=n()),
+        aes(y=mean+1,
+            label=paste0("n=", comma(n), "\nmean=" , round(mean,1)),
+        ),
+        size=1,
+    )+
+    stat_compare_means(comparisons = my_comparisons, size=1.5, method="wilcox.test")+
+    scale_y_continuous(
+        "Standard deviation in start or end position\nof FIRE elements over a FIRE peak (bp)",
+        #expand = c(0, 0),
+        trans="log10",
+        label=comma,
+    ) +   # for both axes to remove unneeded padding
+    annotation_logticks(side="l")+
+    facet_col(~is_cage_peak) +
+    #coord_cartesian(ylim=c(10,1000))+
+    my_grid()
+
+my_ggsave("Figures/FIRE-peak-size-std-dev-facet.pdf", width=3, height=3)
+```

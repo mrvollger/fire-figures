@@ -5,28 +5,31 @@ source("Rscripts/Fire-peak-df.R")
 
 ```{r}
 vcf="/mmfs1/gscratch/stergachislab/mvollger/projects/k-mer-variant-phasing/results/GM12878/hiphase/GM12878.vcf.gz"
-vcf_df = fread(cmd=glue("bcftools view -f 'PASS' -i 'GT=\"HET\"' {vcf} | grep -v ^##"))
-imprinted=my_read_bed("data/lcl_dmr_coordinates_Akbari.bed.gz")
+vcf_df_raw = fread(cmd=glue("bcftools view -f 'PASS' -i 'GT=\"HET\"' {vcf} | grep -v ^##"))
 ```
 
 ```{r}
-vcf_df = vcf_df %>% 
+set.seed(1) 
+vcf_df = vcf_df_raw %>% 
     mutate(start = POS-1) %>%
     rename(
         chrom="#CHROM",
         end=POS
     )
-vcf_df
 nrow(vcf_df)/1e6
 
 hap_peaks=my_read_bed("results/GM12878/hap1-vs-hap2/FIRE.hap.differences.bed") %>%
     filter(p_adjust<=0.05 & autosome=="Autosome" ) %>%
     data.table
+rand_hap_peaks = bed_shuffle(hap_peaks, FAI)
 
 mean(hap_peaks$end-hap_peaks$start)
 mean(vcf_df$end-vcf_df$start)
 
-hap_peaks %>%
+hap_peaks_with_null = bind_rows(
+    list(real=hap_peaks, shuffle=rand_hap_peaks),
+    .id="type"
+    ) %>%
     select(-start.other, end.other) %>%
     bed_map(vcf_df,
         n_variants = n(),
@@ -37,7 +40,29 @@ hap_peaks %>%
     replace_na(list(
         n_variants=0,
         imprinted="not-imprinted"
-    )) %>%
+    )) 
+
+p_sum = hap_peaks_with_null %>% group_by(type) %>%
+    summarise(
+        n_with_variants = sum(n_variants > 0),
+        n_without_variants = sum(n_variants == 0)
+    ) %>%
+    ungroup %>%
+    pivot_wider(names_from=type, values_from=starts_with("n_")) %>%
+    rowwise %>%
+    mutate(
+        p_value = fisher.test(matrix(
+            c(n_with_variants_real, n_without_variants_real, n_with_variants_shuffle, n_without_variants_shuffle),
+            ncol=2),
+            alternative="greater"
+            )$p.value,        
+    )
+p_sum
+```
+
+```{r}
+hap_peaks_with_null %>%
+    filter(type=="real") %>%
     ggplot(
         aes(
             x=pmin(n_variants, 10),
@@ -74,8 +99,14 @@ hap_peaks %>%
     scale_fill_manual("",
         values=c("imprinted"="darkorange","not-imprinted"="darkgrey")
     ) +
+    ggtitle(glue(
+    "Fisher's exact one-sided p-value: {p_sum$p_value}\n",
+    "real: with {p_sum$n_with_variants_real} without {p_sum$n_without_variants_real};   ",
+    "shuffle: with {p_sum$n_with_variants_shuffle} without {p_sum$n_without_variants_shuffle}"
+    ), font_size=1) +
     theme(
         legend.position="top",
+        plot.title = element_text(size = 8, face = "bold"),
     ) 
 
 my_ggsave("Figures/n-variants-per-hap-peak.pdf", height=3, width=3)

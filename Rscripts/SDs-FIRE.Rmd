@@ -1,0 +1,44 @@
+
+```{r}
+source("Rscripts/Fire-peak-df.R")
+```
+
+```{r}
+sd_fire_df = fire_df %>%
+    filter(is_SD) %>%
+    replace_na(
+        list(
+            is_dnase_peak=F,
+            SD_max_frac_match=0.88
+        )
+    ) 
+
+percent_fire_only = mean(sd_fire_df$is_dnase_peak==F)
+
+asdfsad = sd_fire_df%>%
+    mutate(
+        is_dnase_peak = ifelse(is_dnase_peak, "FIRE and DNase peak", "FIRE only peak")
+    ) %>%
+    ggplot(aes(x=SD_max_frac_match, fill=is_dnase_peak)) +
+    geom_histogram(binwidth=0.005)+
+    scale_x_continuous(
+        "Percent identity of overlapping SDs",
+        #trans="log10",
+        label=percent,
+    )+
+    scale_y_continuous(
+        "Number of peaks",
+        #trans="log10"
+    )+
+    scale_fill_manual(
+        "",
+        values=c("black", "darkred")
+    )+
+    ggtitle(glue("{round(100*percent_fire_only,2)}% of SD peaks are FIRE only"))+
+    my_hgrid()+
+    theme(legend.position = "top")
+my_ggsave("Figures/SD-fire-peaks-hist.pdf", height=3, width=4)
+```
+
+```{r}
+```
