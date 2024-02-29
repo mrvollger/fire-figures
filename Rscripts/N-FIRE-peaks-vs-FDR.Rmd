@@ -1,0 +1,33 @@
+```{r}
+fdr_track = my_read_bed("results/GM12878/FDR-peaks/FDR.track.bed.gz")
+fdr_track = fdr_track %>%
+    filter(FDR < 0.5) %>%
+    mutate(
+        weight = end - start,
+    ) 
+```
+
+```{r}
+asdfasdfa = fdr_track %>%
+    select(weight, FDR) %>%
+    filter(FDR < 0.25) %>%
+    #sample_n(10e3) %>%
+    ggplot(aes(FDR)) +
+    #stat_ecdf(geom = "step") +
+    stat_bin(
+        aes(y=cumsum(..count..), weight=weight),
+        geom = 'step',
+        bins=1000,
+    ) +
+    scale_y_continuous(
+        "# of bp at FDR threshold",
+        label = comma,
+    ) + 
+    scale_x_continuous(
+        "FDR threshold",
+        #trans = "log10",
+    ) +
+    my_grid()
+my_ggsave("N-bp-vs-FDR.pdf", height = 2, width = 3)
+```
+

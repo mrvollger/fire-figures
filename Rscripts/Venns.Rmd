@@ -1,0 +1,224 @@
+```{r}
+source("Rscripts/Fire-peak-df.R")
+library("ggvenn")
+library(ggupset)
+```
+
+
+```{r}
+fuzz=0
+
+dnase_not_fire = dnase_peaks %>%
+    bed_merge() %>%
+    bed_map(
+        fire_df,
+        is_fire_peak = n() > 0
+    ) %>%
+    replace_na(list(is_fire_peak = FALSE)) %>%
+    filter(!is_fire_peak) %>%
+    select(chrom,start,end)
+
+atac_peaks_not_fire_not_dnase = atac_peaks %>%
+    bed_merge() %>%
+    bed_map(
+        fire_df,
+        is_fire_peak = n() > 0
+    ) %>%
+    bed_map(
+        dnase_peaks,
+        is_dnase_peak = n() > 0
+    ) %>%
+    replace_na(list(is_fire_peak = FALSE, is_dnase_peak=FALSE)) %>%
+    filter(!is_fire_peak, !is_dnase_peak) %>%
+    select(chrom,start,end)
+
+ctcf_peaks_not_fire_not_dnase_not_atac = ctcf_peaks_df %>%
+    bed_merge() %>%
+    bed_map(
+        fire_df,
+        is_fire_peak = n() > 0
+    ) %>%
+    bed_map(
+        dnase_peaks,
+        is_dnase_peak = n() > 0
+    ) %>%
+    bed_map(
+        atac_peaks,
+        is_atac_peak = n() > 0
+    ) %>%
+    replace_na(list(is_fire_peak = FALSE, is_dnase_peak=FALSE, is_atac_peak=F)) %>%
+    filter(!is_fire_peak, !is_dnase_peak, !is_atac_peak) %>%
+    select(chrom,start,end)
+
+data_for_ven = bind_rows(
+    list(
+        FIRE = fire_df %>% select(chrom,start,end),
+        DNase = dnase_not_fire,
+        ATAC = atac_peaks_not_fire_not_dnase,
+        CTCF = ctcf_peaks_not_fire_not_dnase_not_atac
+    ),
+    .id = "call"
+) %>%
+    mutate(
+        start = start - fuzz,
+        end = end + fuzz
+    ) %>%
+    bed_map(
+        unreliable_df,
+        is_unreliable = n() > 0 
+    ) %>%
+    bed_map(
+        SDs,
+        is_SD = n() > 0
+    ) %>%
+    bed_map(
+        blacklist_df,
+        is_blacklist = n() > 0
+    ) %>%
+    bed_map(
+        dnase_peaks,
+        is_dnase_peak = n() > 0
+    ) %>%
+    bed_map(
+        fire_df,
+        is_fire_peak = n() > 0
+    ) %>%
+    bed_map(
+        ctcf_peaks_df,
+        is_ctcf_peak = n() > 0
+    ) %>%
+    bed_map(
+        atac_peaks,
+        is_atac_peak = n() > 0
+    ) %>%
+    replace_na(
+        list(
+            is_unreliable = FALSE,
+            is_SD = FALSE,
+            is_dnase_peak = FALSE,
+            is_fire_peak = FALSE,
+            is_ctcf_peak = FALSE,
+            is_atac_peak = FALSE,
+            is_blacklist = FALSE
+        )
+    ) %>%
+    data.table()
+
+
+filtered_data_for_ven = data_for_ven %>%
+    filter(is_fire_peak | !is_unreliable) %>%
+    filter(!is_blacklist | call == "FIRE") %>%
+    #filter(!is_SD) %>%
+    select(-is_unreliable, -is_SD, -is_blacklist) %>%
+    filter(chrom %in% FAI$chrom) %>%
+    filter(chrom != "chrM") %>%
+    filter(chrom != "chrY") %>%
+    filter(chrom != "chrEBV") 
+
+
+filtered_data_for_ven %>%
+    group_by(call) %>%
+    summarise(
+        n_fire_peaks = sum(is_fire_peak),
+        n_dnase_peaks = sum(is_dnase_peak),
+        n_ctcf_peaks = sum(is_ctcf_peak),
+        n_atac_peaks = sum(is_atac_peak)
+    )
+```
+
+```{r}
+sum(filtered_data_for_ven$is_fire_peak)
+sum(filtered_data_for_ven$is_dnase_peak)
+sum(filtered_data_for_ven$is_ctcf_peak)
+
+data.table(table(filtered_data_for_ven[,c("is_fire_peak","is_dnase_peak","is_ctcf_peak")]))
+
+asdf = filtered_data_for_ven %>%
+    select(-chrom,-start,-end, -is_ctcf_peak) %>%
+    filter(call != "CTCF") %>%
+    ggvenn()
+my_ggsave("Figures/venn-fire-dnase.pdf")
+asdf = filtered_data_for_ven %>%
+    select(-chrom,-start,-end) %>%
+    ggvenn() 
+my_ggsave("Figures/venn-fire-dnase-ctcf.pdf", height=10, width=10)
+```
+
+```{r}
+asdf = filtered_data_for_ven %>%
+    select(-is_ctcf_peak) %>% filter(call != "CTCF") %>%
+    pivot_longer(
+        cols = starts_with("is_"),
+        names_to = "peak_type",
+        values_to = "is_peak"
+    ) %>%
+    # strip peak and is from peak_type
+    mutate(
+        peak_type = gsub("is_", "", peak_type),
+        peak_type = gsub("_peak", "", peak_type),
+        peak_type = factor(peak_type, levels = c("fire", "dnase", "ctcf", "atac"))
+    ) %>%
+    filter(is_peak) %>%
+    group_by(chrom, start, end) %>%
+    summarise(
+        peak_types = list(peak_type)
+    ) %>%
+    ungroup() %>%
+    #sample_n(1000) %>%
+    ggplot(aes(x=peak_types)) +
+    geom_bar() +
+    geom_text(stat='count',
+        aes(label=comma(after_stat(count))),
+        vjust=-1,
+        size=1.5
+    ) +
+    scale_x_upset(n_intersections = 16) +
+    #scale_x_continuous() +
+    xlab("") +
+    scale_y_continuous("Peak count", label=comma) +
+    theme_minimal_hgrid(font_size=6)
+my_ggsave("Figures/upset-fire-dnase-ctcf.pdf", height=4, width=4)
+```
+
+```{r}
+# merge columsn into a new one that is a names list
+ %>%
+    head()
+
+```
+
+```{r}
+
+sum(fire_df$is_ctcf_peak)
+```
+
+
+```{r}
+max_sd = 20
+fire_df %>%
+    filter(fire_coverage/coverage > 0.5) %>%
+    filter(FIRE_start_ssd < max_sd & FIRE_end_ssd < max_sd) %>% 
+    select(chrom,start,end, FIRE_start_ssd, FIRE_end_ssd) %>%
+    arrange(FIRE_start_ssd+FIRE_end_ssd) %>%
+    head(n=20)
+```
+
+```{r}
+z = fire_df[!is_atac_peak & !is_dnase_peak ]
+sum(z$has_ctcf_motif)/nrow(z)
+sum(z$has_ctcf_motif)
+nrow(z)
+```
+
+```{r}
+rand = bed_shuffle(fire_df, FAI) %>%
+    bed_map(ctcf_motifs,
+        has_ctcf_motif = n() > 0
+    ) %>%
+    replace_na(list(has_ctcf_motif = FALSE)) 
+sum(rand$has_ctcf_motif)/nrow(rand)
+sum(fire_df$has_ctcf_motif)
+```
+
+```{r}
+```
