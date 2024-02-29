@@ -71,8 +71,6 @@ percent_plots = percent_encode_long %>%
     coord_cartesian(xlim=c(0,1), clip=FALSE)+
     theme_no_x() +
     theme(legend.position="None")
-
-my_ggsave("Figures/peaks-vs-percent.pdf", height=3, width=5)
 ```
 
 ```{r}
@@ -165,7 +163,6 @@ plot_encode_anno=x %>%
         plot.margin = unit(c(0, 0, 0, 0), "cm"),
     )
 kk=plot_encode_anno+plot_spacer()+percent_plots+plot_layout(heights = c(1,-0.3, 3))
-my_ggsave("Figures/peaks-vs-encode-annotations.pdf", height=4, width=6, plot=kk)
 ```
 
 
@@ -247,6 +244,7 @@ my_ggsave("Figures/peaks-vs-percent.pdf", height=4, width=5)
 ```{r}
 fire_df %>%
     filter(atac_max > 0) %>%
+    filter(is_atac_peak) %>%
     ggplot(aes(x=atac_max, y=acc_percent)) +
     geom_hex(bins=30) +
     scale_fill_distiller("", palette = "Spectral", trans="log10") +
@@ -255,13 +253,14 @@ fire_df %>%
     #facet_wrap(~autosome, ncol=2)+
     #facet_wrap(~group)+
     scale_x_continuous(
-        "FIRE peak score",
+        "ATAC peak signal",
         #labels=comma,
         trans="log10",
     ) +
+    annotation_logticks(side="b") +
     scale_y_continuous(
-        "ATAC signal",
-        labels=percent,
+        "FIRE peak score",
+        labels=comma,
         #trans="log10",
     ) + 
     my_grid()
@@ -274,22 +273,24 @@ my_ggsave("Figures/ATAC-vs-FIRE.pdf", height=3, width=4)
 ```{r}
 fire_df %>%
     filter(dnase_max > 0) %>%
-    ggplot(aes(x=score, y=dnase_max+1)) +
+    filter(is_dnase_peak) %>%
+    ggplot(aes(y=score, x=dnase_max)) +
     geom_hex(bins=30) +
     scale_fill_distiller("", palette = "Spectral", trans="log10") +
     stat_cor()+
-    geom_smooth(method="lm", se=F) +
+    #geom_smooth(method="lm", se=F) +
     #facet_wrap(~autosome, ncol=2)+
     #facet_wrap(~group)+
     scale_x_continuous(
+        "DNase peak signal",
+        labels=comma,
+        trans="log10",
+    ) +
+    annotation_logticks(side="b") +
+    scale_y_continuous(
         "FIRE peak score",
         labels=comma,
         #trans="log10",
-    ) +
-    scale_y_continuous(
-        "DNase signal",
-        labels=comma,
-        trans="log10",
     ) + 
     my_grid()
 my_ggsave("Figures/DNase-vs-FIRE.pdf", height=3, width=4)
@@ -297,19 +298,17 @@ my_ggsave("Figures/DNase-vs-FIRE.pdf", height=3, width=4)
 
 # dnase by peak size
 ```{r}
-z=fire_df %>% mutate(
+size_df = fire_df %>% mutate(
         psize=end-start,
         size_group = cut(psize, breaks=c(0,200,250,Inf)),
         size_group2=size_group,
-    ) %>%
-    filter(!is_unreliable, !is_blacklist, !is_SD) %>%
-    filter(chrom != "chrX", chrom != "chrY", is_dnase_peak) %>%
-    filter(dnase_max > 0) %>%
+    ) 
+
+z = size_df %>%
+    filter(is_dnase_peak) %>%
     tidyr::pivot_longer(starts_with("dnase_max")) %>%
-    #filter(dnase_max>0.3) %>%
     filter(!grepl("gc_corrected", name)) %>%
-    #filter(dnase_max>0.3) %>%
-    group_split(is_ctcf_peak, size_group) %>% 
+    group_split(size_group) %>% 
     purrr::map(
         ~ggplot(., aes(x=value, y=acc_percent)) +
             geom_hex(bins=50) + 
@@ -321,9 +320,13 @@ z=fire_df %>% mutate(
             stat_cor(size=2.5)+
             scale_x_continuous(
                 "DNase peak signal", 
-                trans="log10"
+                trans="log10",
+                limits=c(0.1,50)
             ) + 
-            scale_y_continuous("% actuation in Fiber-seq data", label=percent) + 
+            scale_y_continuous("% actuation in Fiber-seq data",
+                label=percent,
+                limits=c(0,1),
+            ) + 
             annotation_logticks(side="b") + 
             my_grid() +
             ggtitle(paste(unique(.$size_group2), "   n=",comma(nrow(.)),sep=""))+
@@ -335,23 +338,23 @@ z=fire_df %>% mutate(
     ) %>% 
     plot_grid(plotlist = ., align = 'hv', ncol = 3)
         
-my_ggsave("Figures/FIRE-peaks-percent-fire-vs-DNase.pdf", height=3, width=7)
+my_ggsave("Figures/FIRE-peaks-percent-fire-vs-DNase.pdf", height=2, width=6)
 ```
 
 # ATAC by peak size
 ```{r}
-fire_df %>% mutate(
-        psize=end-start,
-        size_group = cut(psize, breaks=c(0,200,250,Inf)),
-        size_group2=size_group,
-    ) %>%
-    filter(!is_unreliable, !is_blacklist, !is_SD) %>%
-    filter(chrom != "chrX", chrom != "chrY") %>%
-    filter(atac_max > 1) %>%
+size_df %>% 
+    group_by(size_group, is_atac_peak) %>%
+    summarise(n=n()) 
+
+size_df %>%
+    #filter(!is_unreliable, !is_blacklist, !is_SD) %>%
+    #filter(chrom != "chrX", chrom != "chrY") %>%
+    filter(is_atac_peak) %>%
     pivot_longer(starts_with("atac_max")) %>%
     filter(!grepl("gc_corrected", name)) %>%
     #filter(dnase_max>0.3) %>%
-    group_split(is_ctcf_peak & ! is_dnase_peak, size_group) %>% 
+    group_split(size_group) %>% 
     purrr::map(
         ~ggplot(., aes(x=value, y=acc_percent)) +
             geom_hex(bins=50) + 
@@ -363,21 +366,25 @@ fire_df %>% mutate(
             stat_cor(size=2.5)+
             scale_x_continuous(
                 "ATAC peak signal", 
-                trans="log10"
+                trans="log10",
+                limits=c(10,10e3)
             ) + 
-            scale_y_continuous("% actuation in Fiber-seq data", label=percent) + 
+            scale_y_continuous("% actuation in Fiber-seq data", 
+                limits=c(0,1),
+                label=percent,
+            ) + 
             annotation_logticks(side="b") + 
             my_grid() +
             ggtitle(paste(unique(.$size_group2), "   n=",comma(nrow(.)),sep=""))+
             theme(
-                legend.position="left",
+                legend.position="right",
                 plot.title = element_text(size=5, face="bold"),
                 aspect.ratio=1,
             )
     ) %>% 
     plot_grid(plotlist = ., align = 'hv', ncol = 3)
         
-my_ggsave("Figures/FIRE-peaks-percent-fire-vs-ATAC.pdf", height=3, width=7)
+my_ggsave("Figures/FIRE-peaks-percent-fire-vs-ATAC.pdf", height=2, width=6)
 ```
 
 
@@ -526,16 +533,6 @@ z=df_bp %>%
 my_ggsave("Figures/Other-DNase-over-FIRE-peaks.pdf", height=3, width=5)
 ```
 
-```{r}
-p.df[p.df$position==-width& p.df$exp=="ENCFF658WKQ_DNase",]
-p.df[p.df$position==width-smooth& p.df$exp=="ENCFF658WKQ_DNase",]
-
-df_bp %>%
-    filter(group == 0.05) 
-```
-
-
-
 # make the dreaded heatmap
 ```{r}
 f="Tables/per_site_windows_dnase_and_percent_fire.tbl.gz"
@@ -545,7 +542,10 @@ windows_near_fire_peaks
 ```
 ```{r}
 tFDR=0.05
-peaks_to_sample = fire_df %>% filter(FDR < tFDR) %>% group_by(group) %>% sample_n(100) %>% select(group,ID) %>% data.table
+peaks_to_sample = fire_df %>% filter(FDR <= tFDR) %>% group_by(group) %>%
+    #mutate(n_tmp = seq(n())) %>%
+    sample_n(100, replace=T) %>%
+    select(group,ID) %>% data.table
 sampled_windows_near_fire_peaks = merge(windows_near_fire_peaks, peaks_to_sample, by="ID") %>%
     pivot_longer(
         starts_with("data")
@@ -622,21 +622,56 @@ z=sampled_windows_near_fire_peaks %>%
     filter(offset > xx, offset < -xx ) %>%
     filter(!is.na(value)) %>%
     ggplot(aes(x=offset, weight=100*value, color=name)) +
-    #geom_histogram(bins=200, position="identity")+
-    geom_density()+
-    #facet_col(~name, scales="free_y")+
-    scale_x_continuous(limits=c(xx,-xx))+
-    scale_y_continuous(limits=c(0,NA))+
+    geom_density(adjust=0.5)+
+    facet_grid(~group, scales="free_y")+
+    scale_x_continuous(limits=c(xx,-xx), 
+        # shift labels by 90 degrees
+        guide = guide_axis(angle = 90),
+        breaks = c(xx,0,-xx),
+    )+
+    #scale_y_continuous(limits=c(0,NA))+
     my_grid() +
     theme(
         legend.position="top"
     )
-my_ggsave("Figures/per-site-observations-FDR-{tFDR}-density.pdf", height=3, width=3)
+my_ggsave("Figures/per-site-observations-FDR-{tFDR}-density.pdf", height=3, width=8)
 ```
 
-
-
-
+```{r}
+#fdr_track = fread("results/GM12878/FDR-peaks/FDR.track.bed.gz")
+cov = fread("results/GM12878/coverage/GM12878.bed.gz")
+colnames(cov) = c("chrom", "start", "end", "coverage")
+k = bind_rows(
+    list(
+        fdr_track=fdr_track %>% sample_n(1e6),
+        correct_coverage=cov %>% sample_n(1e6),
+        fire_peaks=fire_df #%>% filter(group> 0.50)
+    ),
+    .id = "source"
+) %>%
+    mutate(
+        weight= end-start
+    )
+zzzz=k %>% 
+    #filter(coverage<200) %>%
+    ggplot(aes(x=coverage)) +
+    geom_histogram(
+        binwidth=1,
+        #stat = "count",
+    ) +
+    geom_text(
+        data = . %>% dplyr::group_by(source) %>% summarise(x = median(coverage)),
+        aes(x=x, y = 0, label=comma(x)),
+        vjust=0.75,
+        size=1.7,
+    ) +
+    scale_x_continuous( 
+        limits=c(0,200),
+    ) +
+    facet_col(~source, scales="free_y")+
+    my_grid()
+my_ggsave("Figures/GM12878-coverage-distribution.pdf", height=3, width=3)
+```
 
 
 

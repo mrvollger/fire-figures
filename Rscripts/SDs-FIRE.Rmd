@@ -9,17 +9,39 @@ sd_fire_df = fire_df %>%
     replace_na(
         list(
             is_dnase_peak=F,
+            is_atac_peak=F,
             SD_max_frac_match=0.88
         )
-    ) 
+    ) %>% pivot_longer(cols=c(is_dnase_peak, is_atac_peak), names_to="peak_type", values_to="is_peak") 
+    
+sd_fire_df %>% group_by(peak_type) %>%
+    summarise(
+        n=n(),
+        n_fire=sum(is_peak),
+        percent_fire=mean(1-is_peak)
+    )
+```
 
-percent_fire_only = mean(sd_fire_df$is_dnase_peak==F)
+```{r}
+mean(fire_df$is_atac_peak==F)
+mean(fire_df$is_dnase_peak!=T)
+```
 
-asdfsad = sd_fire_df%>%
+```{r}
+asdfsad = sd_fire_df %>%
     mutate(
-        is_dnase_peak = ifelse(is_dnase_peak, "FIRE and DNase peak", "FIRE only peak")
+        is_peak = ifelse(is_peak, "Shared peak", "FIRE only peak"),
     ) %>%
-    ggplot(aes(x=SD_max_frac_match, fill=is_dnase_peak)) +
+    group_by(peak_type) %>%
+    mutate(
+        percent_fire = mean(is_peak=="FIRE only peak"),
+        peak_type = ifelse(
+            peak_type=="is_dnase_peak", 
+            glue("DNase: ", round(100*unique(percent_fire),  2), "%"),
+            glue("ATAC: ", round(100*unique(percent_fire),  2), "%")
+        ),
+    ) %>%
+    ggplot(aes(x=SD_max_frac_match, fill=is_peak)) +
     geom_histogram(binwidth=0.005)+
     scale_x_continuous(
         "Percent identity of overlapping SDs",
@@ -32,9 +54,9 @@ asdfsad = sd_fire_df%>%
     )+
     scale_fill_manual(
         "",
-        values=c("black", "darkred")
+        values=c("darkred", "black")
     )+
-    ggtitle(glue("{round(100*percent_fire_only,2)}% of SD peaks are FIRE only"))+
+    facet_col(~peak_type)+
     my_hgrid()+
     theme(legend.position = "top")
 my_ggsave("Figures/SD-fire-peaks-hist.pdf", height=3, width=4)

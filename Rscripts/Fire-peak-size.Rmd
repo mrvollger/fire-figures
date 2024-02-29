@@ -69,6 +69,7 @@ z=sd_df %>%
         label=comma,
     ) +   # for both axes to remove unneeded padding
     annotation_logticks(side="b")+
+    facet_col(~group < 0.10)+
     ggtitle(glue("Mean: {round(mean(sd_df$sd),1)} bp"))+
     #facet_col(~start_end)+
     coord_cartesian(xlim=c(10,1000))+
@@ -112,4 +113,54 @@ z=sd_df %>%
     my_grid()
 
 my_ggsave("Figures/FIRE-peak-size-std-dev-facet.pdf", width=3, height=3)
+```
+
+
+# ORIENTED CAGE TSS deviations
+```{r}
+cage_tss_peaks = fire_df %>%
+    filter(is_cage_tss) %>%
+    filter(cage_tss_strand != ".") %>%
+    filter(!is_ctcf_peak) %>%
+    mutate(
+        is_invariant = grepl("Tissue invariant", encode_anno)
+    )
+cage_tss_peaks %>%
+    group_by(group, is_invariant) %>%
+    summarise(
+        mean(upstream_ssd),
+        mean(downstream_ssd),
+        n()
+    )
+
+asdf = cage_tss_peaks %>%
+    #filter(group>0.5) %>%
+    mutate(
+        is_high = group>0.5,
+    ) %>%
+    pivot_longer(
+        cols=c(upstream_ssd, downstream_ssd),
+        names_to="type",
+        values_to="sd"
+    ) %>%
+    ggplot(aes(y=sd+1,x=type)) +
+    geom_violin(alpha=0.5)+
+    geom_text(
+        data = . %>% group_by(type,is_invariant) %>% dplyr::summarize(stat=median(sd), n=n()),
+        aes(y=stat+1,
+            label=paste0("n=", comma(n), "\nmedian=" , round(stat,1)),
+        ),
+        size=1,
+    )+
+    annotation_logticks(side="l")+
+    facet_col(~is_invariant)+
+    scale_y_continuous(
+        "Standard deviation in start or end position\nof FIRE elements over a CAGE TSS (bp)",
+        trans="log10",
+        #limits=c(30,300),
+    )+
+    coord_cartesian(ylim=c(10,500))+
+    my_hgrid()+
+    theme(legend.position = "top")
+my_ggsave("Figures/CAGE-TSS-orientation-deviation-in-fire-elements.pdf", height=3, width=4)
 ```

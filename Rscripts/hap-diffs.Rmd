@@ -95,19 +95,18 @@ scientific_10 <- function(x) {
 #
 ```{r}
 p_threshold=0.05
-in_file="results/GM12878/hap1-vs-hap2/FIRE.hap.differences.bed"
 out_file_1="Figures/GM12878-hap1-vs-hap2.pdf"
 out_file_2="Figures/GM12878-hap1-vs-hap2-volcano.pdf"
 
 # make the plots
-imprinted=my_read_bed("data/lcl_dmr_coordinates_Akbari.bed.gz")
-df = my_read_bed(in_file) 
-colnames(df)[1:5]=c("chrom","start","end","xstart","xend")
-tdf = df %>%
-    bed_map(imprinted, imprinted=(length(V4) > 0)) %>%
-    replace_na(list(imprinted=FALSE)) %>%
-    data.table
-tdf
+tdf = fire_df %>%
+    filter(!is.na(diff)) %>%
+    filter(pass_coverage) %>%
+    mutate(
+        p_adjust = p.adjust(p_value, method="BH"),
+        autosome = ifelse(chrom %in% FAI_NO_SEX$chrom , "Autosome", "X"),
+    )
+colnames(tdf)[1:5]=c("chrom","start","end","xstart","xend")
 
 tdf %>%
     ggplot(aes(x=hap1_frac_acc, y=hap2_frac_acc)) +

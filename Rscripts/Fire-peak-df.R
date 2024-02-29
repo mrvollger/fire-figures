@@ -1,6 +1,7 @@
 source("Rscripts/utils.R")
 library(regioneR)
 library(BSgenome.Hsapiens.UCSC.hg38)
+
 if(F){
     FAI = fread("~/assemblies/hg38.analysisSet.chrom.sizes") %>%
         filter(!grepl("_", V1))
@@ -26,8 +27,12 @@ if(F){
     G_size = sum(FAI$end - FAI$start)
     encode=my_read_bed("data/ENCODE3_consensus_DHS_ENCFF503GCK.tsv.gz")
     tss=my_read_bed("data/gencode.v42.annotation_TSS.gff3.gz")
+    colnames(tss)[1:6] = c("chrom", "start", "end", "name", "score", "strand")
     cage_df = my_read_bed("data/GM12878_cage_peaks_merged.bed.gz")
  
+    cage_tss_with_direction_df = fread("data/TSS-CAGE-FIRE-intersect.bed.gz")
+    colnames(cage_tss_with_direction_df)[1:6] = c("chrom", "start", "end", "name", "score", "strand")
+    
     # data 
     dnase_peaks=my_read_bed("data/ENCFF762CRQ_DNase_peaks.bed.gz")
     dnase=my_read_bed("../phased-fdr-and-peaks/data/bedgraph_annotations/ENCFF960FMM_dnase_signal.bed")
@@ -44,6 +49,8 @@ if(F){
     c2=my_read_bed("data/CTCF_peak_ENCFF960ZGP.bed.gz")
     ctcf_peaks_df = bind_rows(c1,c2) %>% bed_merge()
 
+    ctcf_motifs = my_read_bed("data/ctcf-motifs.bed.gz")
+
 
     in_file="results/GM12878/FDR-peaks/FDR-FIRE-peaks.bed.gz"
     df=fread(in_file)
@@ -53,6 +60,8 @@ if(F){
     df$ID = paste0(df$chrom, "_", df$start, "_", df$end)
 
     df = df %>%
+        filter(acc_percent >= MIN_FRAC_ACC) %>%
+        filter(pass_coverage) %>%
         arrange(-acc_percent) %>%
         mutate(
             n=seq(n()),
@@ -67,16 +76,28 @@ if(F){
             encode_anno = paste0(unique(component), collapse=";")
         ) %>%
         bed_map(sds, sd_count=length(end)) %>%
-        bed_map(dnase, dnase_max=max(dnase_sig)) %>%
-        bed_map(tss, TSS=length(V4)) %>%
+        bed_map(tss,
+            TSS=length(name),
+            is_TSS = n()>0,
+            TSS_strand = case_when(
+                length(unique(strand)) == 1 ~ unique(strand)[1],
+                TRUE ~ ".",
+            ),
+        ) %>%
         bed_map(dnase_peaks, 
             is_dnase_peak = n()>0,
         ) %>%
         bed_map(ctcf_peaks_df, 
             is_ctcf_peak = n()>0,
         ) %>%
-        bed_map(imprinted, imprinted=(length(V4) > 0)) %>%
-        bed_map(atac, atac_max = max(atac_sig)) %>%
+        bed_map(
+            ctcf_motifs,
+            has_ctcf_motif = n()>0,
+        ) %>%
+        bed_map(
+            imprinted,
+            imprinted=n()>0
+        ) %>%
         bed_map(
             unreliable_df,
             is_unreliable = n()>0,
@@ -103,31 +124,70 @@ if(F){
         bed_map(
             SDs_all,
             SD_max_frac_match = max(fracMatch),
+        ) %>% 
+        bed_map(
+            cage_tss_with_direction_df,
+            is_cage_tss = n()>0,
+            cage_tss_strand = case_when(
+                length(unique(strand)) == 1 ~ unique(strand)[1],
+                TRUE ~ ".",
+            ),
         ) %>%
+        bed_map(atac, atac_max = max(atac_sig)) %>%
+        bed_map(dnase, dnase_max = max(dnase_sig)) %>%
         replace_na(
             list(
                 encode_count = 0,
                 sd_count=0,
                 TSS=0,
+                is_TSS=F,
                 is_atac_peak=F,
                 is_ctcf_peak=F,
+                is_dnase_peak=F,
+                has_ctcf_motif=F,
                 imprinted=F,
                 is_alt=F,
                 is_SD=F,
                 is_blacklist=F,
                 is_cage_peak=F,
-                is_unreliable=F
+                is_unreliable=F,
+                is_cage_tss=F
             )
         ) %>%
         arrange(-acc_percent, -n) %>%
         mutate(
             group = case_when(
-                floor(acc_percent * 20) / 20 == 1 ~ 0.95,
+                floor(acc_percent * 20) / 20 >= 0.9 ~ 0.9,
                 TRUE ~ floor(acc_percent * 20) / 20,
             )
         ) %>%
         data.table()
+    unique(df$group)
+    table(df$TSS_strand)
+    table(df$cage_tss_strand)
 
+    df = df %>%
+        mutate(
+            re_strand = case_when(
+                is.na(TSS_strand) & !is.na(cage_tss_strand) ~ cage_tss_strand,
+                !is.na(TSS_strand) & is.na(cage_tss_strand) ~ TSS_strand,
+                (cage_tss_strand != TSS_strand) ~ cage_tss_strand,
+                TRUE ~ cage_tss_strand,
+            ), 
+            #re_stand = cage_tss_strand,
+            downstream_ssd = case_when(
+                re_strand == "-" ~ FIRE_start_ssd,
+                re_strand == "+" ~ FIRE_end_ssd,
+                TRUE ~ NA,
+            ),
+            upstream_ssd = case_when(
+                re_strand == "+" ~ FIRE_start_ssd,
+                re_strand == "-" ~ FIRE_end_ssd,
+                TRUE ~ NA,
+            ),
+        )
+    #cond = df$is_cage_tss & (df$cage_tss_strand != ".") & (df$is_ctcf_peak == F) & df$group > 0.5
+    
     #Build a GRanges from your matrix
     ranges <- toGRanges(df[,c("chrom", "start", "end")])
 
@@ -147,7 +207,19 @@ if(F){
     summary(fit)
     df$atac_max_gc_corrected = predict(fit, newdata=df) 
 
-    fire_df = df
+    # add hap specific peaks 
+    hap_peaks = my_read_bed("results/GM12878/hap1-vs-hap2/FIRE.hap.differences.bed") %>%
+        filter(fire_coverage/coverage >= MIN_FRAC_ACC) %>%
+        mutate(
+            p_adjust = p.adjust(p_value, method="BH"),
+        ) %>%
+        dplyr::select(
+            chrom, start, end, 
+            hap1_frac_acc, hap1_acc, hap2_acc, hap2_frac_acc, hap1_nacc, hap2_nacc,
+            p_value, p_adjust, diff
+        )
+
+    fire_df = merge(df, hap_peaks, by=c("chrom", "start", "end"), all.x=T)
 
     system("mkdir -p Rdata")
     con <- pipe("pigz -p8 > Rdata/df.fire-peaks.gz", "wb")
@@ -157,6 +229,7 @@ if(F){
         dnase_peaks,
         atac_peaks,
         ctcf_peaks_df,
+        ctcf_motifs,
         sds,
         tss,
         imprinted,

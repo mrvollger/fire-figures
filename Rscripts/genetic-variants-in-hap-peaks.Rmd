@@ -81,7 +81,7 @@ hap_peaks_with_null %>%
             fill=imprinted,
         ),
         color="black",
-        vjust=1,
+        vjust=1,Z
         binwidth=1,
         geom="text_repel",
         min.segment.length=unit(1000, "lines"),
@@ -89,7 +89,7 @@ hap_peaks_with_null %>%
         size=1.5,
     ) +
     scale_x_continuous(
-        glue("Number of heterozygous genetic variants per haplotype-specific peak\n(n={nrow(hap_peaks)} autosomal peaks)"),
+        glue("# of heterozygous SNVs per hap-selective peak\n(n={comma(nrow(hap_peaks))} autosomal peaks)"),
         breaks=seq(0,10),
         labels=c(seq(0,9), "10+")
     ) +
@@ -99,7 +99,7 @@ hap_peaks_with_null %>%
         values=c("imprinted"="darkorange","not-imprinted"="darkgrey")
     ) +
     ggtitle(glue(
-    "Fisher's exact one-sided p-value: {p_sum$p_value}\n",
+    "Fisher's exact one-sided p-value: {scientific(p_sum$p_value)}\n",
     "Real data: with {p_sum$n_with_variants_real} without {p_sum$n_without_variants_real};   ",
     "Shuffled data: with {p_sum$n_with_variants_shuffle} without {p_sum$n_without_variants_shuffle}"
     )) +
@@ -109,7 +109,6 @@ hap_peaks_with_null %>%
     ) 
 
 my_ggsave("Figures/n-variants-per-hap-peak.pdf", height=3, width=3)
-
 
 
 ```

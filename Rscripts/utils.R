@@ -509,3 +509,15 @@ trans_anti_logit_e <- trans_new(
   inverse   = logit_e,
   #domain    = c(-Inf, Inf)
 )
+
+
+read_fire_peaks = function(f, min_frac_acc=0.0){
+    pdf = my_read_bed(f) %>%
+        filter(fire_coverage/coverage >= min_frac_acc) %>%
+        filter(pass_coverage)
+    colnames(pdf)[1:5]=c("chrom", "start","end","ostart","oend")
+    if("p_value" %in% colnames(pdf)){
+        pdf$p_adjust = p.adjust(pdf$p_value, method="BH")
+    }
+    pdf
+}
