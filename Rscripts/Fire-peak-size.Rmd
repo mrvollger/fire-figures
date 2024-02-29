@@ -87,6 +87,12 @@ my_comparisons = list(
 )
 
 z=sd_df %>%
+  mutate(
+    is_cage_peak = case_when(
+        is_cage_peak ~ "CAGE peak",
+        TRUE ~ "Not CAGE peak"
+    ),
+  ) %>%
   ggplot(aes(y=sd+1, x = paste(is_ctcf_peak, is_TSS))) + 
     geom_violin()+
     #geom_text(

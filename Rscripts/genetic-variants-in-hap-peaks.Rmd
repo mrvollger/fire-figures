@@ -81,7 +81,7 @@ hap_peaks_with_null %>%
             fill=imprinted,
         ),
         color="black",
-        vjust=1,Z
+        vjust=1,
         binwidth=1,
         geom="text_repel",
         min.segment.length=unit(1000, "lines"),

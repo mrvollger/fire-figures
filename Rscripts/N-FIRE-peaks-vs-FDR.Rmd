@@ -28,6 +28,6 @@ asdfasdfa = fdr_track %>%
         #trans = "log10",
     ) +
     my_grid()
-my_ggsave("N-bp-vs-FDR.pdf", height = 2, width = 3)
+my_ggsave("Figures/N-bp-vs-FDR.pdf", height = 2, width = 3)
 ```
 

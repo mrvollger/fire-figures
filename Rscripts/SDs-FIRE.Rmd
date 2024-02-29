@@ -37,8 +37,8 @@ asdfsad = sd_fire_df %>%
         percent_fire = mean(is_peak=="FIRE only peak"),
         peak_type = ifelse(
             peak_type=="is_dnase_peak", 
-            glue("DNase: ", round(100*unique(percent_fire),  2), "%"),
-            glue("ATAC: ", round(100*unique(percent_fire),  2), "%")
+            glue("Not DNase: ", round(100*unique(percent_fire),  2), "%"),
+            glue("Not ATAC: ", round(100*unique(percent_fire),  2), "%")
         ),
     ) %>%
     ggplot(aes(x=SD_max_frac_match, fill=is_peak)) +
@@ -60,7 +60,4 @@ asdfsad = sd_fire_df %>%
     my_hgrid()+
     theme(legend.position = "top")
 my_ggsave("Figures/SD-fire-peaks-hist.pdf", height=3, width=4)
-```
-
-```{r}
 ```

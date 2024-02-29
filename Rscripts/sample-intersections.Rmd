@@ -21,38 +21,19 @@ compare_plot = function(z, x_col, y_col){
         ggplot(aes(x=.data[[x_col]], y=.data[[y_col]])) +
         geom_hex(bins=50) + scale_fill_distiller("", palette = "Spectral", trans="log10") +
         stat_cor(size=2.5)+
-        geom_smooth(se=F, method="lm", color="black", linetype="dashed", size=.3)+
+        geom_smooth(se=F, method="lm", color="black", linetype="dashed", linewidth=.3)+
         scale_x_continuous(glue("FIRE score of {x_col}"), limits=c(0,100)) + 
         scale_y_continuous(glue("FIRE score of {y_col}"), limits=c(0,100)) + 
         #facet_row(~name,    strip.position = "left") + 
         coord_fixed() +
-        my_grid()
+        my_grid() +
+        theme(aspect.ratio=1)
 }
 
 z=compare_plot(comparisons, "GM12878", "PS00356")    
-my_ggsave("Figures/FIRE-peak-corelation-GM12878-PS00356.pdf", height=2, width=2.5)
+my_ggsave("Figures/GM12878-vs-PS00356.pdf", height=2, width=2.5)
 z=compare_plot(comparisons, "PS00338", "PS00356")    
-my_ggsave("Figures/FIRE-peak-corelation-PS000338-PS00356.pdf", height=2, width=2.5)
+my_ggsave("Figures/PS000338-vs-PS00356.pdf", height=2, width=2.5)
 z=compare_plot(comparisons, "GM12878", "GM12878_30X")
-my_ggsave("Figures/FIRE-peak-corelation-GM12878-30X.pdf", height=2, width=2.5)
+my_ggsave("Figures/GM12878-vs-GM12878-30X.pdf", height=2, width=2.5)
 ```
-
-```{r}
-data="Tables/DNase-peaks-vs-percent-fire.bed.gz"
-d=fread(data)
-colnames(d) = c("chrom", "start", "end", "DNase", "GM12878")
-min(d$DNase)
-max(d$DNase)
-z=d %>%
-    filter(chrom != "chrX", chrom != "chrY") %>%
-    ggplot(aes(x=DNase, y=GM12878)) +
-    geom_hex(bins=50) + scale_fill_distiller("", palette = "Spectral", trans="log10") +
-    stat_cor(size=2.5)+
-    scale_x_continuous("DNase peak signal", trans="log10") + 
-    scale_y_continuous("% actuation in Fiber-seq data") + 
-    annotation_logticks(side="b") + 
-    my_grid() 
-#zz=z+geom_xsidedensity(aes(y=stat(density))) + geom_ysidedensity(aes(x=stat(density))) 
-my_ggsave("Figures/DNase-peaks-vs-percent-fire.pdf", height=2, width=2.75)
-```
-
