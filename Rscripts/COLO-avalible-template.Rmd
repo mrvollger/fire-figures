@@ -55,9 +55,15 @@ fire = fread("results/PS00357_COLO829T_1/FDR-peaks/FDR-FIRE-peaks.bed.gz") %>%
         `#chrom` != "chrX",
         `#chrom` != "chrY",
     ) %>%
-    filter(coverage * 0.95 <= coverage_H1 + coverage_H2) %>%
+    filter(coverage * 0.9 <= coverage_H1 + coverage_H2) %>%
     filter(
         pmin(coverage_H1, coverage_H2) > 1,
+    ) %>%
+    mutate(
+        o_coverage_H1 = coverage_H1,
+        o_coverage_H2 = coverage_H2,
+        o_fire_coverage_H1 = fire_coverage_H1,
+        o_fire_coverage_H2 = fire_coverage_H2,
     )
 
 # make H1 the hap with more coverage always
@@ -65,7 +71,8 @@ fire$swap = fire$coverage_H1 > fire$coverage_H2
 #tmp[R2 == val, c("R1", "R2") := .(R2, R1)]
 fire[swap==TRUE, c("coverage_H1", "coverage_H2") := .(coverage_H2, coverage_H1)]
 fire[swap==TRUE, c("fire_coverage_H1", "fire_coverage_H2") := .(fire_coverage_H2, fire_coverage_H1)]
-
+median(fire$coverage_H1)
+median(fire$coverage_H2)
 fire$class_H1 = predict(m, fire$coverage_H1)$classification
 fire$class_H2 = predict(m, fire$coverage_H2)$classification
 table(fire$class_H1)
@@ -136,7 +143,7 @@ norm_vs_dup_df_coverage %>%
     ggplot(aes(fill=type, x=coverage_hap)) +
     geom_density(
         #aes(y = after_stat(scaled)),
-        alpha=0.75, adjust=0.3
+        alpha=0.75, adjust=.6
     ) +
     scale_fill_manual("",
         labels=rev(c("Duplicated haplotype", "Normal haplotype")),
@@ -152,22 +159,24 @@ my_ggsave("Figures/COLO-available-template-total-coverage.pdf")
 
 
 ```{r}
-median(norm_vs_dup_df_wide$coverage_H1)
-median(norm_vs_dup_df_wide$coverage_H2)
-median(norm_vs_dup_df_wide[is_dup==TRUE]$coverage_H1)
+fire %>%
+    pivot_longer(
+        cols = c("o_coverage_H1", "o_coverage_H2"),
+        names_to = "type",
+        values_to = "coverage_hap"
+    ) %>%
+    ggplot(aes(x=coverage_hap, fill=type)) +
+    geom_density(alpha=0.75, adjust=0.6) +
+    scale_fill_manual("",
+        labels=c("Haplotype 1", "Haplotype 2"),
+        values=c("skyblue", "darkred"),
+    ) +
+    scale_x_continuous("Coverage", limits=c(0,100), breaks=seq(0,1000,25)) +
+    my_grid()+
+    theme(legend.position="top")
+my_ggsave("Figures/COLO-T-coverage.pdf", height=3, width=3) 
 ```
 
-
-```{r}
-pdf("tmp.pdf")
-hist(
-    fire[coverage<200]$coverage_H2, breaks=100
-    )
-dev.off()
-
-getmode(fire$coverage_H1)
-getmode(fire$coverage_H2)
-```
 
 
 

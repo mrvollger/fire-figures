@@ -11,16 +11,27 @@ vcf_df = fread(cmd=glue("bcftools view -f 'PASS' -i 'GT=\"HET\"' {vcf} | grep -v
         chrom="#CHROM",
         end=POS
     )
+pbsv_vcf = 
 ```
 
 ```{r}
 set.seed(1) 
 nrow(vcf_df)/1e6
 
-hap_peaks=my_read_bed("results/GM12878/hap1-vs-hap2/FIRE.hap.differences.bed") %>%
+hap_peaks=fire_df %>%
+    mutate(
+        autosome = case_when(
+            chrom %in% FAI_NO_SEX$name ~ "Autosome",
+            chrom == "chrX" ~ "X",
+            TRUE ~ "Other"    
+        ),
+    ) %>%
+    filter(!is.na(diff)) %>%
     filter(p_adjust<=0.05 & autosome=="Autosome" ) %>%
     data.table
+sum(hap_peaks$imprinted)
 rand_hap_peaks = bed_shuffle(hap_peaks, FAI)
+sum(rand_hap_peaks$imprinted)
 
 mean(hap_peaks$end-hap_peaks$start)
 mean(vcf_df$end-vcf_df$start)
@@ -29,17 +40,20 @@ hap_peaks_with_null = bind_rows(
     list(real=hap_peaks, shuffle=rand_hap_peaks),
     .id="type"
     ) %>%
-    select(-start.other, end.other) %>%
+    #select(-start.other, end.other) %>%
     bed_map(vcf_df,
         n_variants = n(),
     ) %>% 
-    bed_map(imprinted,
-        imprinted = "imprinted"
-    ) %>%
     replace_na(list(
-        n_variants=0,
-        imprinted="not-imprinted"
-    )) 
+        n_variants=0
+    )) %>%
+    mutate(
+        str_imprinted = case_when(
+            imprinted == TRUE ~ "imprinted",
+            TRUE ~ "not-imprinted",
+        )
+    )
+hap_peaks_with_null %>% group_by(type) %>% summarise(sum(imprinted), n())
 
 p_sum = hap_peaks_with_null %>% group_by(type) %>%
     summarise(
@@ -60,6 +74,7 @@ p_sum
 ```
 
 ```{r}
+table(hap_peaks_with_null[hap_peaks_with_null$type=="real",]$str_imprinted)
 hap_peaks_with_null %>%
     filter(type=="real") %>%
     ggplot(
@@ -68,7 +83,7 @@ hap_peaks_with_null %>%
         )
     ) +
     geom_histogram(
-        aes(fill=imprinted),
+        aes(fill=str_imprinted),
         binwidth=1,
         #color="black",
         width=0.4,
@@ -77,8 +92,6 @@ hap_peaks_with_null %>%
         aes(
             y = after_stat(count),
             label=ifelse(..count.. > 0, ..count.., ""),
-            #after_stat(count),
-            fill=imprinted,
         ),
         color="black",
         vjust=1,
@@ -109,6 +122,42 @@ hap_peaks_with_null %>%
     ) 
 
 my_ggsave("Figures/n-variants-per-hap-peak.pdf", height=3, width=3)
+```
 
+```{r}
+hap_peaks_with_null %>%
+    filter(type=="real") %>%
+    mutate(
+        diff_5mC = abs(hap1_5mC_percent - hap2_5mC_percent),
+        has_variant = case_when(
+            n_variants > 0 ~ "With variants",
+            TRUE ~ "Without variants"
+        )
+    ) %>%
+    ggplot(
+        aes(
+            x=diff_5mC,
+            fill=has_variant,
+        )
+    ) +
+    geom_histogram(
+        aes(y=..density..), 
+        binwidth=5, alpha=0.5, position="dodge", color="black"
+    ) +
+    scale_fill_manual("",
+        values=c("With variants"="darkblue","Without variants"="darkgrey")
+    )+
+    scale_x_continuous(
+        "% difference in mCpG levels between haplotypes",
+    ) +
+    #geom_density(adjust = 0.1, alpha=0.5)+
+    facet_col(~str_imprinted) +
+    my_grid() +
+    theme(
+        legend.position="top",
+    ) 
+my_ggsave("Figures/5mC-difference-in-hap-selective-peaks.pdf", height=3, width=3)
+```
 
+```{r}
 ```

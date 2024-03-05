@@ -37,6 +37,7 @@ library(ggpubr)
 library(valr)
 library(pals)
 
+MIN_FRAC_ACC = 0.10
 
 Red="#c1272d"
 Indigo="#0000a7"

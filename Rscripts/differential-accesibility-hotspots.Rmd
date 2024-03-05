@@ -192,7 +192,7 @@ for(idx in seq(4)){
 }
 
 dev.off()
-system("cp tmp.pdf Figures/differential-peaks-ideogram.pdf")
+system("cp tmp.pdf Figures/hap-specific-peaks-ideogram.pdf")
 dev.off()
 ```
 
@@ -233,10 +233,10 @@ all_peaks
 
 ```{r}
 if(AUO){
-    PS00381 = fread("results/PS00381/FDR-peaks/FDR.track.coverage.filtered.bed.gz")
-    PS00382 = fread("results/PS00382/FDR-peaks/FDR.track.coverage.filtered.bed.gz")
-    PS00383 = fread("results/PS00383/FDR-peaks/FDR.track.coverage.filtered.bed.gz")
-    PS00384 = fread("results/PS00384/FDR-peaks/FDR.track.coverage.filtered.bed.gz")
+    PS00381 = fread("results/PS00381/FDR-peaks/FDR.track.bed.gz")
+    PS00382 = fread("results/PS00382/FDR-peaks/FDR.track.bed.gz")
+    PS00383 = fread("results/PS00383/FDR-peaks/FDR.track.bed.gz")
+    PS00384 = fread("results/PS00384/FDR-peaks/FDR.track.bed.gz")
     df_list = list(
         PS00381=PS00381,
         PS00382=PS00382,
@@ -245,8 +245,8 @@ if(AUO){
     )
     MIN_COV=5
 }else{
-    GM12878 = fread("results/GM12878/FDR-peaks/FDR.track.coverage.filtered.bed.gz")
-    PS00338 = fread("results/PS00338_COLO829BL_1/FDR-peaks/FDR.track.coverage.filtered.bed.gz")
+    GM12878 = fread("results/GM12878/FDR-peaks/FDR.track.bed.gz")
+    PS00338 = fread("results/PS00338_COLO829BL_1/FDR-peaks/FDR.track.bed.gz")
     df_list = list(
         GM12878=GM12878,
         PS00338=PS00338
@@ -533,7 +533,7 @@ rank_100k %>%
     theme_minimal_grid()+
     theme(legend.position="top")
 #my_ggsave("Figures/MHC-different-epi-haplotypes-rank.pdf", width=12, height=8)
-my_ggsave("Figures/All-different-epi-haplotypes-rank.pdf", width=12, height=22)
+my_ggsave("Figures/inter-sample-epi-comparison-rank-ideogram.pdf", width=12, height=22)
 ```
 
 # check if we have more overlap than expected with SDs or ALTs
@@ -546,7 +546,7 @@ merged_both_rank2 = bed_merge(both_rank_2, max_dist=1e5+1,
 merged_both_rank2
 
 merged_both_rank2 %>% 
-    fwrite("Tables/both-rank-2.bed", sep="\t", quote=F, na="NA")
+    fwrite("Figures/inter-sample-epi-comparison-both-rank-two.txt", sep="\t", quote=F, na="NA")
 
 
 random_windows = merged_both_rank2 %>%
@@ -583,7 +583,7 @@ null_both_rank2 %>%
     ggplot(aes(x=value, fill=observed, color=observed)) +
     geom_histogram(
         data = . %>% filter(observed != "observed"),
-        binwidth=0.001
+        binwidth=0.025,
     ) +
     geom_vline(
         data = . %>% filter(observed == "observed"),
@@ -610,7 +610,7 @@ null_both_rank2 %>%
     facet_col(~type) +
     theme(legend.position="top")
 
-null_both_rank2 %>%
+zz=null_both_rank2 %>%
     pivot_longer(
         cols = c(Alt, SD),
         names_to = "type",
@@ -618,12 +618,17 @@ null_both_rank2 %>%
     ) %>%
     group_by(type) %>%
     dplyr::summarize(
-        z = 1 - mean(value[observed=="observed"] > value[observed!="observed"]),
-        x=value[observed=="observed"], 
+        p_value = 1 - mean(value[observed=="observed"] > value[observed!="observed"]),
+        expected = mean(value[observed!="observed"]),
+        observed=value[observed=="observed"], 
+        p_less=1/(n()-1)
     )
-     
+zz
+zz %>%
+    fwrite("Figures/inter-sample-epi-comparison-SD-alt-overlaps.txt", sep="\t")
 
-my_ggsave("Figures/Overlap-with-alts-or-SDs-for-inter-hap-ranks.pdf", width=4, height=3)
+
+my_ggsave("Figures/inter-sample-epi-comparison-SD-alt-overlaps.pdf", width=4, height=3)
 table(null_both_rank2$average_alt_overlap)
 ```
 
@@ -655,7 +660,7 @@ rank_100k %>%
     ) +
     #facet_zoom(ylim = c(0, 100e6)) +
     theme(legend.position="top")
-my_ggsave("Figures/epi-haps-mean-rank-histogram.pdf", height=6, width=8)
+my_ggsave("Figures/inter-sample-epi-comparison-rank-histogram.pdf", height=6, width=8)
 ```
 
 
@@ -672,6 +677,9 @@ library(runner)
 library(parallel)
 
 roll_enrichment_test_df = function(d){
+    if(length(unique(d$chrom))>1){
+        return(NA)
+    }
     tn_all_peaks = d$tn_all_peaks[1]
     tn_hap_peaks = d$tn_hap_peaks[1]
     tn_not_hap_peaks = tn_all_peaks - tn_hap_peaks
@@ -699,6 +707,7 @@ roll_enrichment_test_df = function(d){
 n_in_w = 100
 group_var = "sample_type"
 zz = df_all %>%
+    #filter(chrom%in%c("chr6", "chr7")) %>%
     filter(chrom %in% FAI_NO_SEX$name) %>%
     dplyr::group_by(get(group_var)) %>%
     mutate(
@@ -712,7 +721,7 @@ zz = df_all %>%
     data.table
 table(zz[,c("tn_hap_peaks", "tn_all_peaks")])
 
-cl <- makeForkCluster(16)
+cl <- makeForkCluster(8)
 idxs = seq(n_in_w/2, nrow(zz), n_in_w/10)
 k = runner(
     zz, 
@@ -723,8 +732,9 @@ k = runner(
     cl=cl,
 )
 stopCluster(cl)
-a = data.table(t(k)) %>%
-    unnest() %>%
+a = bind_rows(k[!is.na(k)]) %>%
+    #data.table(t(k[!is.na(k)])) %>%
+    #unnest() %>%
     filter(start < end) %>%
     filter(!is.na(p_value)) %>%
     ungroup() %>%
@@ -804,6 +814,87 @@ z=to_use %>%
         strip.background =element_rect(fill="white"),
         #strip.text.x = element_text(size = 4, color = "black")
     ) 
-my_ggsave("Figures/epi-haps-binom.pdf", width=8, height=3)
+my_ggsave("Figures/significant-enrichment-of-hap-specific-peaks.pdf", width=8, height=3)
 ```
 
+```{r}
+hla_classes = my_read_bed("chr6 32430523 33480577 HLA-class-II
+chr6 31564074 32430523 HLA-class-III
+chr6 29694717 31564074 HLA-class-I
+", sep=" ") %>%
+    mutate(width = end - start) %>%
+    expand_grid(my_group=unique(to_use$my_group)) %>%
+    group_by(my_group) %>%
+    bed_map(
+        to_use %>%
+            group_by(my_group) %>%
+            mutate(
+                ostart=start,
+                oend=end,
+                start=,
+                end=oend,
+            ),
+        #window_start = ostart[which.min(p_adjust)],
+        #window_end = oend[which.min(p_adjust)],
+        midpoint = ostart[which.min(p_adjust)],
+        n_hap_peaks = n_hap_peaks[which.min(p_adjust)],
+        n_not_hap_peaks = n_not_hap_peaks[which.min(p_adjust)],
+        tn_hap_peaks = tn_hap_peaks[which.min(p_adjust)],
+        tn_all_peaks = tn_all_peaks[which.min(p_adjust)],
+        p_value = min(p_value),
+        p_adjust = min(p_adjust),
+    ) %>%
+    data.table(); colnames(hla_classes)[4] = "class"
+hla_classes %>% filter("CD8+"==my_group)
+hla_classes
+
+
+rr=to_use %>%
+    bed_map(
+        hla_classes,
+        #is_hla = n() > 0,
+        hla_class = class,
+    ) %>%
+    filter(!is.na(hla_class))  %>%
+    mutate(
+        class=hla_class
+    ) %>%
+    group_by(
+        my_group, class, p_value, p_adjust,
+        n_hap_peaks, n_not_hap_peaks, tn_hap_peaks, tn_all_peaks,
+    ) %>%
+    summarise(
+        start=min(start),
+        end=max(end),
+    )
+hla_classes %>%
+    mutate(
+        class2 = glue("{class}\n({chrom}:{comma(start)}-{comma(end)})"),
+    ) %>%
+    ggplot(aes(y=class, x=p_adjust, color=my_group, alpha=p_adjust<0.05)) +
+    geom_jitter(width=0, height=0.2)+
+    scale_x_continuous(
+        "Adjusted p-value",
+        trans=reverselog_trans(10),
+        labels=scientific_10,
+    ) +
+    geom_vline(aes(xintercept=0.05), linetype="dashed")+
+    facet_col(~class2,scales="free_y") + 
+    scale_alpha_manual(
+        "Significant",
+        values=c(0.25, 1)
+    )+
+    scale_color_manual(
+        "",
+        values=colors 
+    )+
+    ylab("")+
+    my_grid() +
+    theme(
+        legend.position="right",
+    )
+my_ggsave("Figures/significant-enrichment-of-hap-specific-peaks-HLA-classes.pdf", width=3, height=2)
+
+hla_classes %>% filter(my_group=="CD8+")
+rr %>% filter(my_group=="CD8+") %>% filter(p_value<0.05) %>% filter(n_hap_peaks == 15)
+```
