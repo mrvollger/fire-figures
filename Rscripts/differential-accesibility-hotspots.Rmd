@@ -706,7 +706,7 @@ roll_enrichment_test_df = function(d){
 
 n_in_w = 100
 group_var = "sample_type"
-zz = df_all %>%
+df_all_with_counts = df_all %>%
     #filter(chrom%in%c("chr6", "chr7")) %>%
     filter(chrom %in% FAI_NO_SEX$name) %>%
     dplyr::group_by(get(group_var)) %>%
@@ -719,12 +719,12 @@ zz = df_all %>%
         idx = seq(1, n()),
     ) %>%
     data.table
-table(zz[,c("tn_hap_peaks", "tn_all_peaks")])
+table(df_all_with_counts[,c("tn_hap_peaks", "tn_all_peaks")])
 
 cl <- makeForkCluster(8)
-idxs = seq(n_in_w/2, nrow(zz), n_in_w/10)
+idxs = seq(n_in_w/2, nrow(df_all_with_counts), n_in_w/10)
 k = runner(
-    zz, 
+    df_all_with_counts, 
     k = n_in_w, lag = -n_in_w/2,
     f = roll_enrichment_test_df,
     at = idxs,
@@ -818,61 +818,65 @@ my_ggsave("Figures/significant-enrichment-of-hap-specific-peaks.pdf", width=8, h
 ```
 
 ```{r}
-hla_classes = my_read_bed("chr6 32430523 33480577 HLA-class-II
-chr6 31564074 32430523 HLA-class-III
-chr6 29694717 31564074 HLA-class-I
+hla_regions = my_read_bed("chr6 32411052 33480577 HLA-class-II
+chr6 31513107 32411051 HLA-class-III
+chr6 29510623 31513106 HLA-class-I
 ", sep=" ") %>%
-    mutate(width = end - start) %>%
-    expand_grid(my_group=unique(to_use$my_group)) %>%
-    group_by(my_group) %>%
-    bed_map(
-        to_use %>%
-            group_by(my_group) %>%
-            mutate(
-                ostart=start,
-                oend=end,
-                start=,
-                end=oend,
-            ),
-        #window_start = ostart[which.min(p_adjust)],
-        #window_end = oend[which.min(p_adjust)],
-        midpoint = ostart[which.min(p_adjust)],
-        n_hap_peaks = n_hap_peaks[which.min(p_adjust)],
-        n_not_hap_peaks = n_not_hap_peaks[which.min(p_adjust)],
-        tn_hap_peaks = tn_hap_peaks[which.min(p_adjust)],
-        tn_all_peaks = tn_all_peaks[which.min(p_adjust)],
-        p_value = min(p_value),
-        p_adjust = min(p_adjust),
-    ) %>%
-    data.table(); colnames(hla_classes)[4] = "class"
-hla_classes %>% filter("CD8+"==my_group)
-hla_classes
+    mutate(width = end - start); colnames(hla_regions)[4] = "class"
 
-
-rr=to_use %>%
+class_specifc_test_df = df_all_with_counts %>%
     bed_map(
-        hla_classes,
-        #is_hla = n() > 0,
-        hla_class = class,
+        hla_regions,
+        class = class[1],
+        cstart=start[1],
+        cend=end[1],
     ) %>%
-    filter(!is.na(hla_class))  %>%
+    filter(!is.na(class)) %>%
     mutate(
-        class=hla_class
+        my_group = sample_type,
+        start=cstart,
+        end=cend,
     ) %>%
     group_by(
-        my_group, class, p_value, p_adjust,
-        n_hap_peaks, n_not_hap_peaks, tn_hap_peaks, tn_all_peaks,
+        chrom,
+        start,
+        end,
+        sample_type,
+        my_group,
+        tn_all_peaks,
+        tn_hap_peaks,
+        class
     ) %>%
     summarise(
-        start=min(start),
-        end=max(end),
+        n_all_peaks = n(),
+        n_hap_peaks = sum((p_value <= 0.05) & (abs(diff) > 0.25)),
+        n_not_hap_peaks = n_all_peaks - n_hap_peaks,
+    ) %>%
+    rowwise() %>%
+    mutate(
+        tn_not_hap_peaks = tn_all_peaks - tn_hap_peaks,
+        p_value = fisher.test(
+            matrix(c(n_hap_peaks, n_not_hap_peaks, tn_hap_peaks, tn_not_hap_peaks), nrow=2),
+            alternative="greater"
+        )$p.value,
+    ) %>%
+    ungroup() %>%
+    mutate(
+        p_adjust = p.adjust(p_value, method="fdr"),
     )
-hla_classes %>%
+
+class_specifc_test_df %>%
     mutate(
         class2 = glue("{class}\n({chrom}:{comma(start)}-{comma(end)})"),
     ) %>%
     ggplot(aes(y=class, x=p_adjust, color=my_group, alpha=p_adjust<0.05)) +
-    geom_jitter(width=0, height=0.2)+
+    geom_jitter(width=0, height=0.05)+
+    geom_text_repel(
+        data = . %>% filter(p_adjust<0.05),
+        aes(label = glue("{n_hap_peaks}/{n_all_peaks}")),
+        size=1,
+        min.segment.length = 0,
+    ) +
     scale_x_continuous(
         "Adjusted p-value",
         trans=reverselog_trans(10),

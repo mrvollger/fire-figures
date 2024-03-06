@@ -4,6 +4,7 @@ source("Rscripts/Fire-peak-df.R")
 ```
 
 ```{r}
+library(stringr)
 vcf="data/GM12878.vcf.gz"
 vcf_df = fread(cmd=glue("bcftools view -f 'PASS' -i 'GT=\"HET\"' {vcf} | grep -v ^##"))  %>% 
     mutate(start = POS-1) %>%
@@ -11,7 +12,34 @@ vcf_df = fread(cmd=glue("bcftools view -f 'PASS' -i 'GT=\"HET\"' {vcf} | grep -v
         chrom="#CHROM",
         end=POS
     )
-pbsv_vcf = 
+
+pbsv = "data/GM12878.pbsv.vcf.gz"
+KVsep <- fixed(";")  #key-value separator
+pbsv_vcf = fread(cmd=glue("bcftools view -f 'PASS' -i 'GT=\"HET\"' {pbsv} | grep -v ^##")) %>%
+   mutate(start = POS-1) %>%
+    rename(
+        chrom="#CHROM",
+    ) %>%
+    select(-ALT) %>%
+    mutate(KVpairs = str_split(INFO, KVsep)) %>%
+    unnest(KVpairs) %>%
+    separate(KVpairs, into = c("key", "value"), sep="\\=") %>%
+    spread(key, value) %>%
+    mutate(
+        end = as.numeric(END)
+    )
+pbsv_ends = pbsv_vcf %>%
+    pivot_longer(
+        cols=c("start", "end")
+    ) %>%
+    select(chrom,name,value) %>%
+    mutate(
+        start = value, 
+        end = start + 1,
+    ) %>%
+    filter(!is.na(end))
+    #%>%unnest()
+max(pbsv_vcf$end-pbsv_vcf$start, na.rm=T)
 ```
 
 ```{r}
@@ -42,17 +70,34 @@ hap_peaks_with_null = bind_rows(
     ) %>%
     #select(-start.other, end.other) %>%
     bed_map(vcf_df,
-        n_variants = n(),
+        n_SNVs = n(),
     ) %>% 
+    bed_map(pbsv_ends,
+        n_SVs = n(),
+    ) %>%
     replace_na(list(
-        n_variants=0
+        n_SNVs=0,
+        n_SVs=0
     )) %>%
     mutate(
         str_imprinted = case_when(
             imprinted == TRUE ~ "imprinted",
             TRUE ~ "not-imprinted",
-        )
+        ),
+        has_SVs = case_when(
+            n_SVs > 0 ~ "has SV(s)",
+            TRUE ~ "no SVs",
+        ),
+        n_variants = n_SNVs+n_SVs,
+        has_variants = case_when(
+            n_variants > 0 ~ "With variants",
+            TRUE ~ "Without variants",
+        ),
     )
+hap_peaks_with_null %>% group_by(type) %>% summarise(
+    sum(n_SVs),
+    sum(n_SVs>0),
+)
 hap_peaks_with_null %>% group_by(type) %>% summarise(sum(imprinted), n())
 
 p_sum = hap_peaks_with_null %>% group_by(type) %>%
@@ -74,7 +119,6 @@ p_sum
 ```
 
 ```{r}
-table(hap_peaks_with_null[hap_peaks_with_null$type=="real",]$str_imprinted)
 hap_peaks_with_null %>%
     filter(type=="real") %>%
     ggplot(
@@ -102,7 +146,7 @@ hap_peaks_with_null %>%
         size=1.5,
     ) +
     scale_x_continuous(
-        glue("# of heterozygous SNVs per hap-selective peak\n(n={comma(nrow(hap_peaks))} autosomal peaks)"),
+        glue("# of heterozygous variants (SNVs,indels,SVs)\nper hap-selective peak (n={comma(nrow(hap_peaks))} autosomal peaks)"),
         breaks=seq(0,10),
         labels=c(seq(0,9), "10+")
     ) +
@@ -121,43 +165,89 @@ hap_peaks_with_null %>%
         plot.title = element_text(size = 5, face = "bold"),
     ) 
 
-my_ggsave("Figures/n-variants-per-hap-peak.pdf", height=3, width=3)
+my_ggsave("Figures/hap-selective-n-variants-per-peak.pdf", height=3, width=3)
+```
+
+```{r}
+not_hap_sel_df = fire_df %>% filter(p_adjust >= 0.05 | is.na(p_adjust)) %>% mutate(
+    has_variants = "Non-haplotype-selective peaks"
+) %>%  mutate(
+        str_imprinted = case_when(
+            imprinted == TRUE ~ "imprinted",
+            TRUE ~ "not-imprinted",
+        ))
+bw=5
+bind_rows(list(hap_peaks_with_null %>% filter(type=="real"), not_hap_sel_df)) %>%
+    mutate(
+        #diff_5mC = ave_hap_5mC_diff,
+        diff_5mC = max_hap_5mC_diff,
+    ) %>%
+    filter(!is.na(diff_5mC)) %>%
+    ggplot(
+        aes(
+            x=diff_5mC,
+            #fill=has_variants,
+            #fill=str_imprinted,
+        )
+    ) +
+    geom_histogram(
+        aes(y=bw* after_stat(density) ),
+        binwidth=bw, alpha=0.5, color="black"
+    ) +
+    geom_text(
+        data = . %>%
+            dplyr::group_by(str_imprinted, has_variants) %>%
+            dplyr::summarise(count = n(), stat = mean(diff_5mC)),
+        aes(x=50, y=.2, label = glue("n={comma(count)}\nmean={comma(stat)}")),
+        size=1,
+    ) +
+    #geom_density() +
+    scale_fill_manual("",
+        #values=c("With variants"="darkblue","Without variants"="darkgrey")
+        values=c("imprinted"="darkorange","not-imprinted"="darkgrey")
+    )+
+    scale_x_continuous(
+        "Max % difference in mCpG levels between haplotypes",
+    ) +
+    scale_y_continuous(
+        "fraction of peaks",
+        label=percent
+    )+
+    #geom_density(adjust = 0.1, alpha=0.5)+
+    facet_grid(str_imprinted~has_variants, scale="free_y") +
+    my_grid() +
+    theme(
+        legend.position="top",
+    ) 
+my_ggsave("Figures/hap-selective-5mC-difference-in-peaks.pdf", height=3, width=4)
 ```
 
 ```{r}
 hap_peaks_with_null %>%
     filter(type=="real") %>%
-    mutate(
-        diff_5mC = abs(hap1_5mC_percent - hap2_5mC_percent),
-        has_variant = case_when(
-            n_variants > 0 ~ "With variants",
-            TRUE ~ "Without variants"
-        )
-    ) %>%
     ggplot(
         aes(
-            x=diff_5mC,
-            fill=has_variant,
+            x=abs(diff),
         )
     ) +
     geom_histogram(
-        aes(y=..density..), 
-        binwidth=5, alpha=0.5, position="dodge", color="black"
+        aes(fill=str_imprinted),
+        binwidth=0.01,
+        #color="black",
+        width=0.4,
     ) +
-    scale_fill_manual("",
-        values=c("With variants"="darkblue","Without variants"="darkgrey")
-    )+
     scale_x_continuous(
-        "% difference in mCpG levels between haplotypes",
+        "Percent difference in accessibility between haplotypes",
+        #limits = c(0,NA), 
+        labels=percent,
     ) +
-    #geom_density(adjust = 0.1, alpha=0.5)+
-    facet_col(~str_imprinted) +
-    my_grid() +
+    scale_y_continuous("Number of peaks") +
+    my_hgrid() +
+    scale_fill_manual("", values=c("imprinted"="darkorange","not-imprinted"="darkgrey")) +
+    facet_col(~has_variants, scale="free_y") + 
     theme(
         legend.position="top",
+        plot.title = element_text(size = 5, face = "bold"),
     ) 
-my_ggsave("Figures/5mC-difference-in-hap-selective-peaks.pdf", height=3, width=3)
-```
-
-```{r}
+my_ggsave("Figures/hap-selective-accessibility-difference-by-variants.pdf", height=3, width=3)
 ```

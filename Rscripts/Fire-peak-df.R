@@ -47,8 +47,8 @@ if(F){
     #chr1    10468   10469   92.4    hap1    43      40      3       93.0
     cpg_df = my_read_bed("data/GM12878-5mC.hap.bed.gz");
     colnames(cpg_df) = c("chrom", "start", "end", 
-        "raw_hap1_percent_5mC", "hap1_percent_5mC",
-        "raw_hap2_percent_5mC", "hap2_percent_5mC"
+        "raw_hap1_5mC_percent", "hap1_5mC_percent",
+        "raw_hap2_5mC_percent", "hap2_5mC_percent"
     )
     
 
@@ -141,16 +141,16 @@ if(F){
                 TRUE ~ ".",
             ),
         ) %>%
-        bed_map(atac, atac_max = max(atac_sig)) %>%
-        bed_map(dnase, dnase_max = max(dnase_sig)) %>%
         bed_map(cpg_df,
             max_hap_5mC_diff = max(abs(hap1_5mC_percent - hap2_5mC_percent))[1],
-            max_hap1_5mC_percent = max(hap1_percent_5mC)[1],
-            max_hap2_5mC_percent = max(hap2_percent_5mC)[1],
+            max_hap1_5mC_percent = max(hap1_5mC_percent)[1],
+            max_hap2_5mC_percent = max(hap2_5mC_percent)[1],
             ave_hap_5mC_diff = mean(abs(hap1_5mC_percent - hap2_5mC_percent))[1],
             ave_hap1_5mC_percent = mean(hap1_5mC_percent)[1],
             ave_hap2_5mC_percent = mean(hap2_5mC_percent)[1],
         ) %>%
+        bed_map(atac, atac_max = max(atac_sig)) %>%
+        bed_map(dnase, dnase_max = max(dnase_sig)) %>%
         replace_na(
             list(
                 encode_count = 0,
