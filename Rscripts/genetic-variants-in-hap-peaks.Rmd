@@ -197,9 +197,9 @@ bind_rows(list(hap_peaks_with_null %>% filter(type=="real"), not_hap_sel_df)) %>
     geom_text(
         data = . %>%
             dplyr::group_by(str_imprinted, has_variants) %>%
-            dplyr::summarise(count = n(), stat = mean(diff_5mC)),
-        aes(x=50, y=.2, label = glue("n={comma(count)}\nmean={comma(stat)}")),
-        size=1,
+            dplyr::summarise(count = n(), stat = mean(diff_5mC)/100),
+        aes(x=50, y=.2, label = glue("n={comma(count)}\nmean={percent(stat)}")),
+        size=1.5,
     ) +
     #geom_density() +
     scale_fill_manual("",
@@ -210,7 +210,7 @@ bind_rows(list(hap_peaks_with_null %>% filter(type=="real"), not_hap_sel_df)) %>
         "Max % difference in mCpG levels between haplotypes",
     ) +
     scale_y_continuous(
-        "fraction of peaks",
+        "% of peaks",
         label=percent
     )+
     #geom_density(adjust = 0.1, alpha=0.5)+
