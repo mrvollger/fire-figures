@@ -135,9 +135,10 @@ hap_peaks_with_null %>%
     stat_bin(
         aes(
             y = after_stat(count),
+            fill=str_imprinted,
             label=ifelse(..count.. > 0, ..count.., ""),
         ),
-        color="black",
+        #color="black",
         vjust=1,
         binwidth=1,
         geom="text_repel",
@@ -177,12 +178,26 @@ not_hap_sel_df = fire_df %>% filter(p_adjust >= 0.05 | is.na(p_adjust)) %>% muta
             TRUE ~ "not-imprinted",
         ))
 bw=5
-bind_rows(list(hap_peaks_with_null %>% filter(type=="real"), not_hap_sel_df)) %>%
+asdf = bind_rows(
+        list(hap_peaks_with_null %>%
+            filter(type=="real"),
+            not_hap_sel_df
+        )
+    ) %>%
     mutate(
         #diff_5mC = ave_hap_5mC_diff,
         diff_5mC = max_hap_5mC_diff,
     ) %>%
     filter(!is.na(diff_5mC)) %>%
+    data.table
+
+asdf2 = copy(asdf %>% filter(has_variants!="Non-haplotype-selective peaks"))
+asdf2$has_variants = "All haplotype-selective peaks" 
+
+bind_rows(list(asdf,asdf2)) %>%
+    mutate(
+        has_variants = factor(has_variants, levels=c("Non-haplotype-selective peaks", "All haplotype-selective peaks", "With variants", "Without variants")),
+    ) %>%
     ggplot(
         aes(
             x=diff_5mC,
@@ -219,7 +234,7 @@ bind_rows(list(hap_peaks_with_null %>% filter(type=="real"), not_hap_sel_df)) %>
     theme(
         legend.position="top",
     ) 
-my_ggsave("Figures/hap-selective-5mC-difference-in-peaks.pdf", height=3, width=4)
+my_ggsave("Figures/hap-selective-5mC-difference-in-peaks.pdf", height=3, width=5)
 ```
 
 ```{r}

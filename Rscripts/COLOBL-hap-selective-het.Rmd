@@ -1,0 +1,131 @@
+```{r}
+source("Rscripts/utils.R")
+source("Rscripts/Fire-peak-df.R")
+```
+```{r}
+vcf="data/PS00388_COLO829BL_1.deepvariant.vcf.gz"
+vcf_bl = fread(cmd=glue("bcftools view -f 'PASS' -i 'GT=\"HET\"' {vcf} | grep -v ^##"))  %>% 
+    mutate(start = POS-1) %>%
+    rename(
+        chrom="#CHROM",
+        end=POS
+    )
+
+bl_peaks = my_read_bed("results/PS00338_COLO829BL_1/hap1-vs-hap2/FIRE.hap.differences.bed")
+bl_peaks
+```
+
+
+```{r}
+set.seed(1) 
+nrow(vcf_bl)/1e6
+
+hap_peaks=bl_peaks %>%
+    mutate(
+        autosome = case_when(
+            chrom %in% FAI_NO_SEX$name ~ "Autosome",
+            chrom == "chrX" ~ "X",
+            TRUE ~ "Other"    
+        ),
+    ) %>%
+    filter(!is.na(diff)) %>%
+    filter(p_adjust<=0.05 & autosome=="Autosome" ) %>%
+    mutate(
+        imprinted=FALSE
+    ) %>%
+    data.table
+
+rand_hap_peaks = bed_shuffle(hap_peaks, FAI)
+
+
+hap_peaks_with_null = bind_rows(
+    list(real=hap_peaks, shuffle=rand_hap_peaks),
+    .id="type"
+    ) %>%
+    bed_map(vcf_bl,
+        n_SNVs = n(),
+    ) %>% 
+    replace_na(list(
+        n_SNVs=0
+    )) %>%
+    mutate(
+        str_imprinted = case_when(
+            imprinted == TRUE ~ "imprinted",
+            TRUE ~ "not-imprinted",
+        ),
+        n_variants = n_SNVs,
+        has_variants = case_when(
+            n_variants > 0 ~ "With variants",
+            TRUE ~ "Without variants",
+        ),
+    )
+hap_peaks_with_null %>% group_by(type) %>% summarise(sum(imprinted), n())
+
+p_sum = hap_peaks_with_null %>% group_by(type) %>%
+    summarise(
+        n_with_variants = sum(n_variants > 0),
+        n_without_variants = sum(n_variants == 0)
+    ) %>%
+    ungroup %>%
+    pivot_wider(names_from=type, values_from=starts_with("n_")) %>%
+    rowwise %>%
+    mutate(
+        p_value = fisher.test(matrix(
+            c(n_with_variants_real, n_without_variants_real, n_with_variants_shuffle, n_without_variants_shuffle),
+            ncol=2),
+            alternative="greater"
+            )$p.value,        
+    )
+p_sum
+```
+
+```{r}
+hap_peaks_with_null %>%
+    filter(type=="real") %>%
+    ggplot(
+        aes(
+            x=pmin(n_variants, 10),
+        )
+    ) +
+    geom_histogram(
+        aes(),#fill=str_imprinted),
+        binwidth=1,
+        #color="black",
+        width=0.4,
+    ) +
+    stat_bin(
+        aes(
+            y = after_stat(count),
+            #fill=str_imprinted,
+            label=ifelse(..count.. > 0, ..count.., ""),
+        ),
+        #color="black",
+        vjust=1,
+        binwidth=1,
+        geom="text_repel",
+        min.segment.length=unit(1000, "lines"),
+        direction="y",
+        size=1.5,
+    ) +
+    scale_x_continuous(
+        glue("# of heterozygous variants (SNVs, indels)\nper hap-selective peak (n={comma(nrow(hap_peaks))} autosomal peaks)"),
+        breaks=seq(0,10),
+        labels=c(seq(0,9), "10+")
+    ) +
+    scale_y_continuous("Number of peaks") +
+    my_hgrid() +
+    #scale_fill_manual("",
+    #    values=c("imprinted"="darkorange","not-imprinted"="darkgrey")
+    #) +
+    ggtitle(glue(
+    "Fisher's exact one-sided p-value: {scientific(p_sum$p_value)}\n",
+    "Real data: with {p_sum$n_with_variants_real} without {p_sum$n_without_variants_real};   ",
+    "Shuffled data: with {p_sum$n_with_variants_shuffle} without {p_sum$n_without_variants_shuffle}"
+    )) +
+    theme(
+        legend.position="top",
+        plot.title = element_text(size = 5, face = "bold"),
+    ) 
+
+my_ggsave("Figures/COLO-hap-selective-n-variants-per-peak.pdf", height=3, width=3)
+```

@@ -121,7 +121,7 @@ size_df %>%
     group_by(size_group, is_atac_peak) %>%
     summarise(n=n()) 
 
-size_df %>%
+atac_bin_plot = size_df %>%
     #filter(!is_unreliable, !is_blacklist, !is_SD) %>%
     #filter(chrom != "chrX", chrom != "chrY") %>%
     filter(is_atac_peak) %>%
@@ -160,7 +160,47 @@ size_df %>%
         
 my_ggsave("Figures/FIRE-peaks-percent-fire-vs-ATAC.pdf", height=2, width=6)
 ```
+```{r}
+atac_bin_plot = size_df %>%
+    #filter(!is_unreliable, !is_blacklist, !is_SD) %>%
+    #filter(chrom != "chrX", chrom != "chrY") %>%
+    filter(is_atac_peak) %>%
+    pivot_longer(starts_with("atac_max")) %>%
+    filter(!grepl("gc_corrected", name)) %>%
+    #filter(dnase_max>0.3) %>%
+    #filter(is_ctcf_peak) %>%
+    group_split(is_ctcf_peak, size_group) %>% 
+    purrr::map(
+        ~ggplot(., aes(x=value, y=acc_percent)) +
+            geom_hex(bins=50) + 
+            #geom_smooth(se=F, method="lm", linetype="dashed", size=1)+
+            scale_fill_distiller("", 
+                palette = "Spectral",
+                #trans="log10"
+            ) +
+            stat_cor(size=2.5)+
+            scale_x_continuous(
+                "ATAC peak signal", 
+                trans="log10",
+                limits=c(10,10e3)
+            ) + 
+            scale_y_continuous("% actuation in Fiber-seq data", 
+                limits=c(0,1),
+                label=percent,
+            ) + 
+            annotation_logticks(side="b") + 
+            my_grid() +
+            ggtitle(paste(unique(.$size_group2), "   n=",comma(nrow(.)),sep=""))+
+            theme(
+                legend.position="right",
+                plot.title = element_text(size=5, face="bold"),
+                aspect.ratio=1,
+            )
+    ) %>% 
+    plot_grid(plotlist = ., align = 'hv', ncol = 3)
 
+my_ggsave("Figures/FIRE-peaks-percent-fire-vs-ATAC-CTCF-facet.pdf", height=3, width=6)
+```
 
 
 # dnase with gc in extreams
@@ -450,7 +490,69 @@ my_ggsave("Figures/GM12878-coverage-distribution.pdf", height=3, width=3)
 
 
 
+#
+# ATAC % accessibility vs fire for CTCF vs not CTCF
+#
+```{r}
+ATAC_prop = my_read_bed("/mmfs1/gscratch/stergachislab/mvollger/projects/GM12878_aCRE_2022-08-16/scATAC/with_blacklist/10X_aggr_FIRE_FDR_05_actuation_with_Blacklist.tsv")
+min(ATAC_prop$end - ATAC_prop$start)
 
+# check all the properties are the same
+sum(ATAC_prop$start == fire_df$start)
+nrow(ATAC_prop)
+nrow(fire_df)
+
+fire_df$atac_prop = ATAC_prop$atac_prop
+n_atac_cells = 26910
+fire_df %>% 
+    filter(atac_max > 0) %>%
+    mutate(
+        percent_atac = atac_prop, #atac_max / n_atac_cells,
+        percent_fire = fire_coverage / coverage,
+    ) %>%
+    mutate(
+        bin = glue("[{group}, {group+.05})"),
+        x = factor(100*group),
+    ) %>%
+    ggplot(
+        aes(
+            x=x,
+            y=percent_atac,
+            fill=is_ctcf_peak,
+        )
+    ) +
+    geom_boxplot(
+        #outlier.shape = NA,
+        outlier.size = 0.01, 
+        alpha=0.75,
+        size=0.25,
+    ) +
+    geom_text(
+        data = . %>% dplyr::group_by(x, is_ctcf_peak) %>% dplyr::summarise(c=n()),
+        aes(
+            label=comma(c),
+             y=-0.01 + -0.02 * is_ctcf_peak,
+            color=is_ctcf_peak
+        ),
+        size=1.5,
+    ) +
+    scale_y_continuous("% of scATAC cells with a read overlapping the peak", label=percent) +
+    #scale_x_discrete("% accessible Fiber-seq") +
+    scale_fill_manual(
+        "is a CTCF peak",
+        values=c("skyblue", "darkorange"),
+    ) +
+    scale_color_manual(
+        "is a CTCF peak",
+        values=c("skyblue", "darkorange"),
+    ) +
+    xlab("% accessible Fiber-seq") +
+    my_grid() +
+    theme(
+        legend.position="top"
+    )
+my_ggsave("Figures/percent-ATAC-vs-percent-FIRE-CTCF-vs-not.pdf", height=3, width=4)
+```
 
 
 

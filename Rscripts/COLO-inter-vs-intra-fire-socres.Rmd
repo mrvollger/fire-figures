@@ -1,0 +1,175 @@
+
+```{r}
+BL1 = my_read_bed("results/PS00338_COLO829BL_1/FDR-peaks/FDR-FIRE-peaks.bed.gz")
+BL2 = my_read_bed("results/PS00356_COLO829BL_2/FDR-peaks/FDR-FIRE-peaks.bed.gz")
+min_keep_score = 1 # min(min(BL1$score), min(BL2$score))
+
+BL1_track = my_read_bed("results/PS00338_COLO829BL_1/FDR-peaks/FDR.track.bed.gz") %>%
+    filter(score >= min_keep_score)
+BL2_track = my_read_bed("results/PS00356_COLO829BL_2/FDR-peaks/FDR.track.bed.gz") %>%
+    filter(score > min_keep_score)
+
+union = bind_rows(list(BL1, BL2), .id = "source") 
+union
+BL1_track
+```
+
+
+```{r}
+# get the 99th percentile of the coverage
+max_val = 250 #quantile(union$coverage, 0.999)
+max_val
+
+# pivot longer on coverage coverage_H1 and coverage_H2
+union 
+
+# make a histogram of the coverage
+asdf = union %>% 
+    filter(
+        chrom != "chrM",
+        chrom != "chrY",
+        chrom != "chrX",
+    ) %>%
+    mutate(
+        coverage_UNK = coverage - coverage_H1 - coverage_H2,
+    ) %>%
+    pivot_longer(
+        cols = c(coverage, coverage_H1, coverage_H2),
+        names_to = "coverage_type",
+        values_to = "coverage",
+    ) %>%
+    mutate(
+        coverage = ifelse(coverage > max_val, max_val, coverage)
+    ) %>%
+    ggplot(aes(coverage, fill=source)) +
+    geom_histogram(
+        binwidth=1,
+        position="identity",
+        alpha=0.75,
+    ) +
+    scale_x_continuous("Fiber-seq coverage (over peaks)") +
+    scale_y_continuous("count") +
+    scale_fill_manual(
+        "Sample",
+        values = c("darkred", "skyblue"),
+        labels = c("COLOBL1", "COLOBL2"),
+    ) +
+    facet_col(~coverage_type, 
+        scale="free_y"
+    ) +
+    my_grid() +
+    theme(
+        legend.position = "top",
+    )
+my_ggsave("Figures/COLOBL1-vs-COLOBL2-coverage.pdf", height=3, width=3, plot=asdf)
+```
+
+```{r}
+```
+
+```{r}
+z = BL1 %>%
+    bed_map(
+        BL2, 
+        bl2_fire_coverage = max(fire_coverage),
+        bl2_coverage = max(coverage),
+        bl2_fire_coverage_H1 = max(fire_coverage_H1),
+        bl2_coverage_H1 = max(coverage_H1),
+        bl2_fire_coverage_H2 = max(fire_coverage_H2),
+        bl2_coverage_H2 = max(coverage_H2),
+    ) %>%
+    filter(
+        chrom != "chrM",
+        chrom != "chrY",
+        chrom != "chrX",
+    ) %>%
+    drop_na()
+
+z$combo_fire_H1 = z$fire_coverage_H1 + z$bl2_fire_coverage_H1
+z$combo_coverage_H1 = z$coverage_H1 + z$bl2_coverage_H1
+z$combo_fire_H2 = z$fire_coverage_H2 + z$bl2_fire_coverage_H2
+z$combo_coverage_H2 = z$coverage_H2 + z$bl2_coverage_H2
+
+z$bl1_frac = z$fire_coverage / z$coverage
+z$bl2_frac = z$bl2_fire_coverage / z$bl2_coverage
+z$combo_frac_H1 = z$combo_fire_H1 / z$combo_coverage_H1
+z$combo_frac_H2 = z$combo_fire_H2 / z$combo_coverage_H2
+
+pairs = list(
+    c("bl1_frac", "bl2_frac"),
+    c("combo_frac_H1", "combo_frac_H2")
+)
+longs = list()
+for(pair in pairs){
+    print(pair)
+    tdf = union[, pair]
+    tdf$id1 = pair[1]
+    tdf$id2 = pair[2]
+    longs[[length(longs) + 1]] = tdf %>%
+        rename(
+            val1 = !!pair[1],
+            val2 = !!pair[2],
+        )
+}
+long_union = bind_rows(longs)
+long_union
+```
+
+```{r}
+long_union %>%
+    drop_na() %>%
+    group_by(id1, id2) %>%
+    summarise(
+        n = n(),
+        mean = 100*mean(val1-val2),
+        median = 100*median(val1-val2),
+        sd = sd(val1-val2),    
+    )
+
+max_value = 0.3
+asdf = long_union %>%
+    drop_na() %>%
+    group_by(id1, id2) %>%
+    mutate(
+        id = paste(id1, "-", id2),
+        val = abs(val1 - val2 - mean(val1-val2)),
+        val = ifelse(val > max_value, max_value, val),
+    ) %>%
+    ggplot(aes(val, fill=id)) +
+    geom_histogram(
+        aes(y=after_stat(density)),
+        alpha = 0.75, position="identity",
+        breaks = seq(0,1,0.01/2)
+    ) +
+    #geom_density(alpha = 0.5)+
+    #geom_hex(bins = 100) + 
+    #stat_cor() + 
+    #scale_fill_distiller("", palette = "Spectral", trans="log10") +
+    #facet_grid(id1 ~ id2) +
+    scale_fill_manual(
+        "",
+        values = c("darkred", "skyblue"),
+        labels = c("difference between replicates", "difference between haplotypes"),
+    ) +
+    scale_x_continuous(
+        "Centered absolute difference in Fiber-seq accessibility",
+        limits=c(0, max_value),
+        labels=scales::percent,
+    )+
+    my_grid() +
+    theme(
+        legend.position = "top",
+    )
+
+
+my_ggsave("Figures/COLOBL1-vs-COLOBL2-intra-vs-inter.pdf", height=3, width=3, plot=asdf)
+```
+
+```{r}
+```
+
+```{r}
+```
+
+```{r}
+```
