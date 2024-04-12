@@ -17,12 +17,12 @@ library(rlang)
 #library(gmm)
 # Load the package
 library(mclust)
+SM="COLO_T_2_PS00_418_451_488"
 ```
 
 ```{r}
 ### UNUSED ###
 
-SM="COLO_T_2_PS00_418_451_488"
 all_covs = my_read_bed(glue("results/{SM}/FDR-peaks/FDR.track.bed.gz")) %>%
     # require 95% phasing
     filter(
@@ -331,8 +331,22 @@ colo_compare_df = filtered_colo_tumor_track %>%
     bed_map(
         vcf_bl,
         is_het = n() > 0,
+        n_snvs = n(),
     ) %>%
     replace_na(list(is_het=FALSE, is_imprinted=FALSE))
+
+table(colo_compare_df$source)
+
+colo_compare_df %>% 
+    filter(source=="Tumor passage B") %>%
+    mutate(n_hets = pmin(n_snvs, 3)) %>%
+    group_by(source, n_hets) %>%
+    summarise(
+        count = n()
+    )
+
+
+
 sum(colo_compare_df$is_het)
 table(colo_compare_df$nn)
 
