@@ -1,0 +1,122 @@
+```{r}
+# get a fire peak data table called `df`
+source("Rscripts/utils.R")
+source("Rscripts//Fire-peak-df.R")
+library(pROC)
+
+```
+
+```{r}
+pos = fread("msp-vs-fire-roc-data/pos.msp.bed.gz")
+neg = fread("msp-vs-fire-roc-data/neg.msp.bed.gz")
+
+msp_fire_data = bind_rows(list(`1`=pos,`0`=neg), .id="label") %>%
+    mutate(
+        msp_len = V3 - V2,
+        FDR = V10,
+        fire_pred = 1 - FDR,
+    ) %>% 
+    # cannot be called fire
+    filter(msp_len > 85) %>%
+    # filter out nucs 
+    filter(fire_pred >= 0 ) %>%
+    select(label, msp_len, fire_pred, FDR) 
+
+msp_fire_data %>% 
+    group_by(label) %>%
+    summarise(z=n()) %>%
+    pivot_wider(names_from = label, values_from = z)
+
+fire_roc = roc(msp_fire_data$label, msp_fire_data$fire_pred) 
+msp_roc = roc(msp_fire_data$label, msp_fire_data$msp_len) 
+```
+
+```{r}
+specificity_df = msp_fire_data %>%
+    mutate(
+        # round to nearest 25 
+        msp_len = case_when(
+            #msp_len >= 500 ~ round(msp_len/100)*100,
+            TRUE ~ round(msp_len/10)*10,
+        ),
+    ) %>%
+    #sample_n(10000) %>%
+    select(-FDR) %>%
+    pivot_longer(cols = c(msp_len, fire_pred)) %>%
+    group_by(name, value) %>%
+    summarise(
+        n_ids = sum(label==1),
+        n_total = n()
+    ) %>%
+    group_by(name) %>%
+    arrange(-value, .by_group = TRUE) %>%
+    filter(value > 0) %>%
+    mutate(
+        cum_n_ids = cumsum(n_ids),
+        cum_n_total = cumsum(n_total),
+        specificity = cum_n_ids/cum_n_total,
+        n_fp = cum_n_total - cum_n_ids,
+    ) %>%
+    ungroup() %>%
+    #arrange(-specificity, -value) %>%
+    data.table
+
+specificity_df %>%
+    #filter(name!="msp_len") %>%
+    #filter(specificity>=0.9)
+    filter(cum_n_ids > 1e5) %>%
+    data.table
+
+```
+
+```{r}
+asdfasdf = specificity_df %>%
+    filter(n_fp < 25e3) %>%
+    filter(value < 1 | value >= 150) %>%
+    #filter(n_total> 10 ) %>%
+    ggplot(
+        #aes(x=specificity, y=cum_n_ids, color=name),
+        aes(x=n_fp, y=cum_n_ids, color=name),
+    ) + 
+    geom_line() +
+    geom_point(size=0.5) +
+    geom_text_repel(
+        data = . %>% filter(n_fp >= 5000) %>% filter(value < 100 | value %% 50 == 0),
+        aes(
+            label=glue("TP={comma(cum_n_ids)}\nFP={comma(n_fp)}\nvalue={value}"),
+        ),
+        color="black",
+        min.segment.length = 0,
+        segment.alpha = 0.25,
+        segment.size = 0.2,
+        force=10,
+        direction = "y",
+        nudge_y=-1000,
+        size=1,
+        arrow = arrow(type = "closed", length = unit(0.02, "npc")),
+    ) +
+    #geom_bar(stat="identity")+
+    my_grid() +
+    scale_color_manual(
+        "",
+        labels=c(
+            glue("FIRE prediction"),#; AUC=", round(fire_roc$auc,3)),
+            glue("MSP length")#; AUC=", round(msp_roc$auc,3))
+        ),
+        values=c("darkred", "darkgrey")
+    ) +
+    scale_x_continuous(
+        "Number of actuated regulatory elements outside of DHS sites\n(i.e. false positives)",
+        label = scales::comma,
+        #limits = c(0,10e3),
+    ) +
+    scale_y_continuous(
+        "Number of actuated regulatory elements within DHS sites\n(i.e. true positives)",
+        label = scales::comma
+    ) +
+    theme(
+        legend.position="top"
+    )
+my_ggsave("Figures/msp-vs-fire-roc.pdf", height=3, width=3)
+```
+

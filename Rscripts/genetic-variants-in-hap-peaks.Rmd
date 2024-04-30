@@ -266,3 +266,59 @@ hap_peaks_with_null %>%
     ) 
 my_ggsave("Figures/hap-selective-accessibility-difference-by-variants.pdf", height=3, width=3)
 ```
+
+
+# ideogram with hap peaks (with and without variants)
+```{r}
+ideo_df = hap_peaks_with_null %>%
+    filter(type=="real") 
+
+
+
+system("rm tmp.pdf")
+s = 4
+pdf("tmp.pdf", height=1*s, width=8*s)
+
+kp = karyoploteR::plotKaryotype(genome="hg38", plot.type=3, chromosomes=FAI_NO_SEX$chrom, cex=1.5)
+
+#kpAddBaseNumbers(kp)
+
+ws=5e6
+last.max = -1
+data.panel = 1
+for (t in c("With variants", "Without variants")){
+    data = ideo_df %>% filter(has_variants==t) %>% filter(!imprinted)
+    sample.regions = toGRanges(data$chrom, data$start, data$end)
+    tkp = kpPlotDensity(
+        kp, data=sample.regions, 
+        col=transparent("darkred",0.5),
+        border=transparent("darkred", 0.05),
+        data.panel = data.panel,
+        window.size=ws,
+    )
+    
+    if (last.max < tkp$latest.plot$computed.values$max.density){
+        last.max = tkp$latest.plot$computed.values$max.density
+    }
+
+    kpAxis(kp, 
+        ymax=tkp$latest.plot$computed.values$max.density,
+        cex=1.5,
+        #side="left",
+        numticks=2,
+        data.panel = data.panel,
+    )
+    kpAddLabels(kp, 
+        labels = t, 
+        cex=1.1,
+        data.panel = data.panel, 
+    )
+    data.panel = 2
+}
+
+dev.off()
+system("cp tmp.pdf Figures/hap-specific-peaks-ideogram-with-and-without-variants.pdf")
+dev.off()
+
+
+```

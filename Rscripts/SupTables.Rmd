@@ -1,0 +1,94 @@
+---
+title: "R Notebook"
+output: html_notebook
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+# get a fire peak data table called `df`
+source("Rscripts/utils.R")
+source("Rscripts//Fire-peak-df.R")
+```
+
+```{r}
+df_from_files = function(cov_files){
+    cov_files = cov_files[!grepl("test", cov_files)]
+    cov_files = cov_files[!grepl("bugged_coverage", cov_files)]
+    cov_files = cov_files[!grepl("CHM13", cov_files)]
+    cov_files = cov_files[!grepl("HG002v1.0.1", cov_files)]
+    A = list()
+    for(f in cov_files){
+        t=fread(f)
+        #print(t)
+        f = sub("^results/", "", f)
+        f = dirname(dirname(f))
+        A[[f]] = t
+    }
+    bind_rows(A, .id="file")
+}
+```
+
+# get coverage for each sample
+```{r}
+cov_files = Sys.glob("results/*/coverage/*median*.txt") 
+cov_files = cov_files[!grepl("test", cov_files)]
+cov = df_from_files(cov_files) %>%
+    rename(
+        coverage = V1,
+    )
+cov
+```
+
+# get number of peaks for each sample
+```{r}
+peaks_files = Sys.glob("results/*/FDR-peaks/FDR-FIRE-peaks.bed.gz")
+peak_files = peaks_files[!grepl("test", peaks_files)]
+
+peaks = df_from_files(peak_files) %>%
+    filter(pass_coverage) %>%
+    group_by(file) %>% 
+    summarise(
+        n_peaks = n(),
+        n_peak_mbp = sum(peak_end - peak_start)/1e6,
+    )
+peaks
+```
+
+# get number of wide peaks 
+# rule wide_fdr_peaks
+```{r}
+wide_peaks_files = Sys.glob("results/*/FDR-peaks/FDR-wide-peaks.bed.gz")
+wide_peaks = df_from_files(wide_peaks_files) %>%
+    group_by(file) %>% 
+    summarise(
+        n_wide_peaks = n(),
+        n_wide_peak_mbp = sum(V3 - V2)/1e6,
+    )
+wide_peaks
+```
+
+# get number of hap selective peaks
+```{r}
+hap_peaks_files = Sys.glob("results/*/hap1-vs-hap2/FIRE.hap.differences.bed")
+
+hap_peaks = df_from_files(hap_peak_files) %>%
+    filter(p_value <= 0.05) %>%
+    filter(autosome == "Autosome") %>%
+    group_by(file) %>% 
+    summarise(
+        n_nominal_hap_selective_peaks = n(),
+        n_hap_selective_peaks = sum(p_adjust <= 0.05)
+    )
+hap_peaks
+```
+
+
+
+```{r}
+st1 = merge(cov, peaks) %>%
+    merge(wide_peaks) %>%
+    merge(hap_peaks) %>%
+    rename(sample=file)
+st1
+```
