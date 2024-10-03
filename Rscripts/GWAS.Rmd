@@ -1,0 +1,219 @@
+```{r}
+source("Rscripts/Fire-peak-df.R")
+```
+
+
+```{r}
+gwas.catalog = fread("revision-1/GWAS/download-my-own-catalogs/full", sep="\t", quote="") %>%
+    mutate(
+        chrom = paste0("chr", CHR_ID),
+        start = as.numeric(CHR_POS)-1,
+        end = start+1,
+        rsID=as.numeric(str_replace(SNPS, "^rs", ""))
+    )
+    # %>%
+small.gwas.catalog = gwas.catalog %>%
+    select(`DISEASE/TRAIT`, rsID, REGION, MAPPED_GENE) %>%
+    unique
+
+all.gwas.sites = gwas.catalog %>%
+    select(chrom, start, end) %>%
+    unique
+all.gwas.sites
+gwas.catalog
+```
+
+```{r}
+gwas.df = fread("revision-1/GWAS/hap-selective-peaks/results/closest.bed") %>%
+    mutate(
+        distance = case_when(
+            distance < 0 ~ max(distance),
+            TRUE ~ distance
+        ),
+        rsID=str_extract(INFO, "rsID=[0-9]+") %>% str_replace("rsID=", "") %>% as.numeric,
+        p_distance = pmin(distance, 1e6),
+        real = case_when(
+            group == "real" ~ "haplotype-selective\nFIRE peaks",
+            group == "random" ~ "random sample of\nFIRE peaks",
+            TRUE ~ "random intervals"
+        ),
+    ) 
+
+my_colors = c(
+    "haplotype-selective\nFIRE peaks" = "darkred",
+    "random sample of\nFIRE peaks" = "darkblue",
+    "random intervals" = "darkgray")
+gwas.df$real = factor(gwas.df$real, levels=names(my_colors))
+
+cum.dist.gwas = gwas.df %>%
+    group_by(group, real, distance) %>%
+    summarise(
+        count = n()
+    ) %>%
+    arrange(distance) %>%
+    mutate(
+        cumcount = cumsum(count)
+    )
+head(cum.dist.gwas,20)
+```
+
+
+```{r}
+z=gwas.df %>%
+    ggplot(aes(x=p_distance+1, color=real, group=group)) +
+    geom_step(stat="bin", bins=100, alpha=0.75)+
+    scale_x_continuous(trans='log10', label=comma) +
+    #scale_y_continuous(trans='log10') +
+    facet_zoom(
+        xy = distance < 1e5,
+        horizontal = FALSE
+    ) +
+    theme_cowplot()
+my_ggsave("Figures/distance-from-GWAS-to-closest-hap-selective.pdf", height=4, width=5)
+```
+
+# plot of the cumulative count of GWAS peaks as a function of distance
+```{r}
+cum.dist.gwas %>%
+    ggplot(
+        aes(x=distance, color=real, group=group)
+    ) +
+    geom_line(aes(y=cumcount)) +
+    scale_x_continuous(
+        "Distance from GWAS variant to the closest\nhaplotype-selective FIRE peak",
+        #trans='log10',
+        label=comma
+    ) +
+    #scale_y_continuous(trans='log10') +
+    scale_y_continuous(
+        "Cumulative count of GWAS variants",
+        label=comma
+    ) +
+    scale_color_manual("",values=my_colors) +
+    #scale_linetype_manual("",values=c("solid", "dashed", "solid")) +
+    facet_zoom(
+        xy = distance < 50e3,
+        horizontal = FALSE
+    ) +
+    guides(color=guide_legend(ncol=1))+
+    theme_cowplot(font_size=8)+
+    theme(
+        #legend.position = "top",
+        legend.text = element_text(size=6),
+    )
+my_ggsave("Figures/distance-from-GWAS-to-closest-hap-selective-cumulative.pdf", height=3, width=4)
+```
+
+```{r}
+gwas.df %>%
+    group_by(group, real, group_count) %>%
+    filter(distance==0) %>%
+    summarise(
+        n()
+    )
+
+gwas.df %>%
+    group_by(group, real) %>%
+    filter(distance==0) %>%
+    filter(
+        cumcount == max(cumcount)
+    ) %>%
+    select(
+        group, real, cumcount
+    )
+```
+
+
+
+```{r}
+sum(!fire_df$is_atac_peak)
+gwas.vcf = fread(cmd="bcftools view -H revision-1/GWAS/echtvar/results/gm12878.risk.vcf.gz") %>%
+    mutate(
+        chrom=V1,
+        start = V2-1,
+        end = V2
+    )
+
+gwas.validation = bind_rows(
+    list(
+        real = fire_df,
+        shuffled = bed_shuffle(fire_df, FAI, excl=fire_df) %>% mutate(is_atac_peak=TRUE)
+    ),
+    .id="shuffled"
+    ) %>%
+    bed_map(
+        gwas.vcf,
+        gwas_count = n()
+    ) %>%
+    bed_map(
+        all.gwas.sites,
+        all_gwas_count = n()
+    ) %>%
+    replace_na(list(gwas_count=0, all_gwas_count=0)) %>%
+    group_by(is_atac_peak, shuffled) %>%
+    summarise(
+        n_peaks = n(),
+        gwas_per_kbp_of_fire_peak = 1000 * sum(gwas_count)/sum(end-start),
+        peaks_with_gwas = sum(gwas_count>0),
+        gwas_in_peaks = sum(gwas_count),
+        all_gwas_per_kbp_of_fire_peak = 1000 * sum(all_gwas_count)/sum(end-start),
+        peaks_with_all_gwas = sum(all_gwas_count>0),
+        all_gwas_in_peaks = sum(all_gwas_count),
+        #frac_encode = mean(encode_count > 0),
+    ) %>%
+    data.table
+gwas.validation
+```
+
+```{r}
+gwas.validation %>%
+    mutate(
+        case = case_when(
+            shuffled =="shuffled" ~ "shuffled",
+            is_atac_peak ~ "FIRE peak with ATAC-seq",
+            TRUE ~ "FIRE peak without ATAC-seq"
+        )
+    ) %>%
+    pivot_longer(
+        c(gwas_per_kbp_of_fire_peak, all_gwas_per_kbp_of_fire_peak),
+        names_to="gwas_type",
+        values_to="gwas_per_kbp_of_fire_peak"
+    ) %>%
+    ggplot(aes(y=case, x=gwas_per_kbp_of_fire_peak, fill=is_atac_peak)) +
+    geom_bar(stat="identity", position="dodge", width=0.6) +
+    scale_x_continuous("GWAS variants per 1,000 bp of FIRE peak")+
+    ylab("")+
+    facet_col(~gwas_type, scales="free_x")+
+    scale_fill_manual("", values=c("TRUE"="black", "FALSE"="darkred"))+
+    # drop the fill guide
+    guides(fill="none")+
+    my_grid()
+my_ggsave("Figures/gwas-per-kbp-of-fire-peak.pdf", height=2, width=4)
+```
+
+
+
+```{r}
+colnames(gwas.df)
+to_investigate = gwas.df %>% 
+    filter(real == "haplotype-selective\nFIRE peaks") %>%
+    filter(group=="real") %>%
+    filter(distance < 20e3) %>%
+    select(1:10, rsID, distance, peak_start, peak_end, fire_coverage, coverage, FDR, fire_coverage_H1, coverage_H1, fire_coverage_H2, coverage_H2, p_adjust, diff) %>%
+    merge(small.gwas.catalog, by="rsID", all.x=TRUE) 
+    
+to_investigate %>%
+    fwrite(
+        "revision-1/GWAS/hap-selective-peaks/results/results-to-investigate.tsv",
+        sep="\t",
+        quote=FALSE,
+        row.names=FALSE,
+        na="NA"
+    )
+
+diseases = sort(table(to_investigate$`DISEASE/TRAIT`))
+diseases[diseases> 10]
+length(diseases)
+length(diseases[diseases> 1])
+length(diseases[diseases> 10])
+```

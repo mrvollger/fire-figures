@@ -1,0 +1,81 @@
+```{bash}
+./scripts/get-m6a-percent.sh
+```
+
+
+```{r}
+all_merged_data="SMRTcell  total_m6a_bp       total_AT_bp       n_fibers
+m54329U_210323_190418   7639781 65893667        7484
+m54329U_210326_192251   6148726 53171280        5899
+m54329U_210810_004956   3485748 43751048        3379
+m54329U_210813_020940   4645285 56631675        4395
+m54329U_210814_130637   3648401 45393607        3540
+m64076_210328_012155    8776505 77763388        9064
+m64076_221119_202646    6974175 66287698        5287
+m84008_230107_003043_s1 15225620        202092694       22253
+m84039_230401_031619_s3 5893872 66413289        7392
+m84039_230401_034725_s4 6235177 75426362        8727
+m84039_230404_003541_s3 19444370        208707688       22579
+"
+all_merged = fread(all_merged_data)  %>% 
+  mutate(m6a_density = total_m6a_bp / total_AT_bp)
+all_merged$Sample = "GM12878-merged"
+all_merged
+```
+
+```{r}
+data="Sample  SMRTcell  total_m6a_bp       total_AT_bp       n_fibers
+PS00282.bc2017.s4       m84039_230401_034725_s4 50016399        454003183       71336
+PS00282.bc2017.s3       m84039_230401_031619_s3 79625311        664227553       99999
+PS00281.bc2080.s4       m84039_230401_034725_s4 66540195        869575925       99999
+PS00281.bc2080.s3       m84039_230401_031619_s3 71694826        870063289       96011
+PS00280.bc2079.s4       m84039_230401_034725_s4 66974820        898656398       99999
+PS00278.bc2077.s4       m84039_230401_034725_s4 56035932        960483479       99999
+PS00280.bc2079.s3       m84039_230401_031619_s3 75383431        929598467       99999
+GM12878_WGS.haplotagged m84039_230404_003541_s3 82431243        943913068       99999
+PS00283.bc2018.s4       m84039_230401_034725_s4 113849684       926587238       99999
+PS00278.bc2077.s3       m84039_230401_031619_s3 63574943        998850398       99999
+PS00279.bc2078.s3       m84039_230401_031619_s3 65017680        1008187558      94997
+PS00279.bc2078.s4       m84039_230401_034725_s4 60215618        1012470693      99999
+PS00283.bc2018.s3       m84039_230401_031619_s3 125853842       945579352       99999
+"
+m6a_df = fread(data) %>% 
+  mutate(m6a_density = total_m6a_bp / total_AT_bp)
+m6a_df = bind_rows(list(m6a_df, all_merged[!SMRTcell %in% m6a_df$SMRTcell] )) %>%
+    mutate(
+        type = case_when(
+            grepl("_s", SMRTcell) ~ "Revio",
+            TRUE ~ "Sequel II"
+        )
+    ) %>%
+    group_by(type) %>%
+    mutate(
+        type = glue("{type} (n={n()})")
+    ) %>%
+    ungroup
+m6a_df
+```
+
+```{r}
+m6a_df %>% 
+    ggplot(aes(y=m6a_density, x="")) +
+    geom_quasirandom(aes(color=type))+
+    geom_violin(alpha = 0.1, adjust=0.75)+
+    geom_text_repel(
+        data = . %>% filter(m6a_density == min(m6a_density) | m6a_density == max(m6a_density)),
+        aes(label=percent(m6a_density)),
+        size=2
+    ) +
+    my_grid() +
+    scale_color_manual(
+        "",
+        values=c("darkblue", "darkred")
+    ) +
+    scale_y_continuous(
+        "Percent of A/T bp with m6A",
+        labels=percent
+    )+
+    xlab("") +
+    theme(legend.position = "top") 
+my_ggsave("Figures/range-of-m6a-percent-for-training.pdf", height=3, width=3)
+```

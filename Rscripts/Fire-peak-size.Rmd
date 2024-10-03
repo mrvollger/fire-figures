@@ -8,6 +8,30 @@ editor_options:
 ```{r}
 # get a fire peak data table called `fire_df`
 source("Rscripts/Fire-peak-df.R")
+
+z=fire_df %>% 
+    filter(!is.na(p_value)) %>%
+    mutate(
+        group=round(20*pmax(hap1_frac_acc, hap2_frac_acc))/20,
+        group=case_when(
+            group>0.9 ~ 0.0,
+            TRUE ~ group
+        )
+    ) %>%
+    filter(group>=0.1) %>%
+    group_by(group) %>%
+    summarise(
+        val=100* sum(p_adjust <= 0.05) / n(),
+        n()
+    );z
+z %>%
+    ggplot(aes(x=group,y=val))+
+    geom_point()+
+    my_grid()
+my_g%gsave("tmp.pdf", height=3, width=3)
+    #merge(
+    #    x %>% filter(encode_anno=="Lymphoid")
+    #)
 ```
 
 ```{r}

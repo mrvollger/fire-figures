@@ -92,3 +92,32 @@ st1 = merge(cov, peaks) %>%
     rename(sample=file)
 st1
 ```
+
+
+
+# new table 1
+```{r}
+sup1=fire_df %>% 
+    group_by(group) %>%
+    summarise(
+        `# of FIRE peaks` = n(),
+        `# that overlap with DNase`=sum(is_dnase_peak),
+        `# that overlap with scATAC`=sum(is_atac_peak),
+        `# FIRE only peaks`=sum(!is_dnase_peak & !is_atac_peak)
+        #Mbp = sum(end-start)/1e6,
+    ) %>%
+    mutate(
+        group =paste0(
+            group*100,
+            "-",
+            group*100 + 5,
+            "%"
+        )
+    ) %>%
+    rename(
+        `Percent actuation bin`=group,
+    ) 
+sup1
+sup1 %>%
+    fwrite("Tables/SupTable1.tsv", sep=",", quote=F)
+```

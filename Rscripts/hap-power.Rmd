@@ -1,0 +1,68 @@
+```{r}
+source("Rscripts/utils.R")
+```
+
+
+```{r}
+total_coverage = 135 #235
+phase_rate = 0.9
+n_tests = 2e5
+
+hap_coverage = floor(total_coverage * phase_rate / 2)
+hap_coverage
+
+power_table = data.table(
+        hap_coverage=hap_coverage
+    )  %>%
+    # create all compbs of H1 and H2 accessibility
+    expand_grid(
+        H1_FIRE=seq(0, hap_coverage),
+        H2_FIRE=seq(0, hap_coverage),
+    ) %>%
+    mutate(
+        H1_not_FIRE=hap_coverage - H1_FIRE,
+        H2_not_FIRE=hap_coverage - H2_FIRE,
+    ) %>%
+    rowwise() %>%
+    mutate(
+        p_value = fisher.test(
+            matrix(c(H1_FIRE, H1_not_FIRE, H2_FIRE, H2_not_FIRE), nrow=2),
+        )$p.value,
+    ) %>% ungroup() %>%
+    mutate(
+        p_adjust = p.adjust(p_value, method="BH", n = n_tests),
+        diff = abs(H1_FIRE/hap_coverage - H2_FIRE/hap_coverage),
+        is_significant = p_value <= 0.05,
+        is_adjusted_significant = p_adjust <= 0.05,
+        max_fire_frac = pmax(H1_FIRE/hap_coverage, H2_FIRE/hap_coverage),
+    ) %>%
+    arrange(diff) %>%
+    #distinct(max_fire_frac, .keep_all = TRUE) %>%
+    data.table
+
+```
+
+
+```{r}
+power_table %>%
+    ggplot(
+        aes(x=diff, fill=is_adjusted_significant)
+    ) + 
+    geom_histogram(bins=hap_coverage, alpha=0.85) +
+    scale_fill_manual(values=c("darkgrey", "darkred")) +
+    my_grid() +
+    ggtitle(
+        "Power of FIRE to detect differences in accessibility between haplotypes",
+        subtitle = glue(
+            "Total Coverage: {total_coverage}; Number of tests: {comma(n_tests)}; Phasing rate: {phase_rate}"
+            )
+    ) +
+    scale_x_continuous(
+        "Simulated difference in accessibility between haplotypes",
+        labels=scales::percent,
+    )+
+    theme(
+        legend.position="top",
+    )
+my_ggsave("Figures/hap-power-histogram.pdf", width=5, height=3)
+```

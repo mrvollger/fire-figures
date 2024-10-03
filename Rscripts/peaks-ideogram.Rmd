@@ -1,0 +1,135 @@
+```{r}
+# get data
+source("Rscripts/Fire-peak-df.R")
+```
+
+```{r}
+samples = c("GM12878", "PS00338_COLO829BL_1", "PS00356_COLO829BL_2", "PS00381", "PS00382", "PS00383", "PS00384", "PS00272", "PS00321", "PS00327", "UDN318336_PS00189", "UDN633333_PS00115")
+dfs = c()
+for (sample in samples) {
+    df = my_read_bed(paste0("results/", sample, "/FDR-peaks/FDR-FIRE-peaks.bed.gz"))
+    dfs[[sample]] = df
+}
+
+df_all = bind_rows(dfs, .id="sample" ) %>% 
+    bed_map(SDs,
+        is_SD = n() > 0
+    ) %>%
+    bed_map(ALTs,
+        is_Alt = n() > 0
+    ) %>%
+    bed_map(imprinted,
+        is_imprinted = n() > 0
+    ) %>%
+    replace_na(
+        list(
+            is_SD=F,
+            is_Alt=F,
+            is_imprinted=F
+        )
+    ) %>%
+    data.table
+
+samples = unique(df_all$sample)
+colors = c(
+    "LCL"="darkgreen",
+    "CD8+"="darkred",
+    "Thyroid"="darkblue",
+    "Fibroblast"="darkorange"
+    )
+sample_type = c(
+    "GM12878"="LCL",
+    "PS00338_COLO829BL_1"="LCL",
+    "PS00356_COLO829BL_2"="LCL",
+    "PS00381"="CD8+",
+    "PS00382"="CD8+",
+    "PS00383"="CD8+",
+    "PS00384"="CD8+",
+    "PS00272"="Thyroid",
+    "PS00321"="Thyroid",
+    "PS00327"="Thyroid",
+    "PS00388"="Thyroid",
+    "UDN318336_PS00189"="Fibroblast",
+    "UDN633333_PS00115"="Fibroblast"
+)
+df_all$sample_type = factor(sample_type[df_all$sample], levels=rev(names(colors)))
+df_all$color = colors[df_all$sample_type]
+df_all = df_all %>% arrange(sample_type, sample, chrom, start, end) %>% filter(pass_coverage)
+
+```
+
+
+```{r}
+system("rm tmp.pdf")
+s = 1
+pdf("tmp.pdf", height=6*s, width=8*s)
+
+mhc = "chr6:28,510,120-33,480,577"
+mhc.region = toGRanges(data.frame("chr6", 28510120, 33480577))
+
+ws=1e5
+chrs = paste0("chr", seq(1,22))
+chrs = c("chr6")
+grouping_var = "sample"
+
+c=chrs
+tdf=df_all[`chrom` %in% c] %>%
+    arrange(sample_type, sample, .by_group=T)
+
+gr = GRanges(seqnames=tdf$`chrom`, IRanges(start=tdf$start, end=tdf$end))
+imprinted_gr = GRanges(imprinted[chrom %in% c])
+
+pp <- getDefaultPlotParams(plot.type=4)
+pp$leftmargin=.15
+kp = karyoploteR::plotKaryotype(genome="hg38",
+    plot.type=4, chromosomes = c, plot.params = pp
+)
+
+kpAddBaseNumbers(kp)
+
+#kpPlotDensity(kp, gr, col="blue", ymax = ymax, r0=0.0, r1=0.5, border=NA, window.size=ws,)
+
+r0 = 0 # 0.5
+r_width = 1/length(unique(tdf[[grouping_var]])) # * 0.5
+for(var in unique(tdf[[grouping_var]])){
+    r1 = r0 + r_width*0.85
+    cond = tdf[[grouping_var]] == var
+    ttdf = tdf[cond,]
+    st = ttdf[[grouping_var]][[1]]
+    color = ttdf$color[[1]]
+    sample.regions = GRanges(seqnames=ttdf$`chrom`, IRanges(start=ttdf$start, end=ttdf$end))
+    
+    tkp = kpPlotDensity(
+        kp, data=sample.regions, 
+        r0=r0, r1=r1, 
+        border=transparent(color, 0.5),
+        col=color,
+        #border=NA,
+        data.panel=1,
+        #Zymax=ymax,
+        window.size=ws,
+    )
+    print(tkp$latest.plot$computed.values$max.density)
+    kpAxis(kp, 
+        ymax=tkp$latest.plot$computed.values$max.density,
+        r0=r0, r1=r1,
+        cex=0.5,
+        side="right",
+        numticks=2,
+    )
+    kpAddLabels(kp, labels = st, r0=r0, r1=r1, cex=0.5)
+
+    # mhc highlight 
+    kpPlotRegions(kp, mhc.region, col=transparent("gray", 0.6), r0=r0, r1=r1)
+    
+    r0 = r0 + r_width
+    print(nrow(ttdf))
+}
+
+
+dev.off()
+system("cp tmp.pdf Figures/peaks-ideogram-chr6.pdf")
+dev.off()
+```
+
+
