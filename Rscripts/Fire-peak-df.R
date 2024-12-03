@@ -1,5 +1,6 @@
 source("Rscripts/utils.R")
-library(regioneR)
+#library(regioneR)
+#BiocManager::install("BSgenome.Hsapiens.UCSC.hg38")
 library(BSgenome.Hsapiens.UCSC.hg38)
 
 if(F){

@@ -289,3 +289,24 @@ z=m6a_ratio %>%
     my_grid()
 my_ggsave("Figures/multiome-m6a-ratio-violin.pdf", height=4, width=4)
 ```
+
+# annotation
+```{r}
+## loading packages
+library(ChIPseeker)
+library(TxDb.Hsapiens.UCSC.hg38.knownGene)
+txdb <- TxDb.Hsapiens.UCSC.hg38.knownGene
+
+# In the output, qSample is the name of queryPeak and qLen is the the number of peaks in queryPeak. N_OL is the number of overlap between queryPeak and targetPeak.
+
+downloadGEObedFiles(genome="hg38", destDir="data/GEO-hg38")
+
+enrichPeakOverlap(queryPeak     = files[[5]],
+                  targetPeak    = unlist(files[1:4]),
+                  TxDb          = txdb,
+                  pAdjustMethod = "BH",
+                  nShuffle      = 50,
+                  chainFile     = NULL,
+                  verbose       = FALSE)
+
+```

@@ -9,3 +9,7 @@ temp
 phasing-and-variant-calling
 Rdata
 
+
+# pixi environments
+.pixi
+*.egg-info
