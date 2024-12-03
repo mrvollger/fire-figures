@@ -1,0 +1,105 @@
+```{r}
+
+unfiltered_union = bind_rows(list(fire_df, atac_peaks)) %>%
+    bed_merge() %>%
+    # filter out unreliable_df and blacklist_df
+    bed_map(
+        unreliable_df,
+        is_unreliable = n() > 0
+    ) %>%
+    bed_map(
+        blacklist_df,
+        is_blacklist = n() > 0
+    ) %>%
+    bed_map(
+        fire_df,
+        fire_score = max(score)[[1]],
+        fire_frac = max(fire_coverage/coverage)[[1]]
+    )  %>%
+    bed_map(
+        atac_peaks,
+        atac_score = max(V7)[[1]],
+    ) %>%
+    replace_na(
+        list(
+            fire_score = 0,
+            fire_frac = 0,
+            atac_score = 0,
+            is_unreliable = FALSE,
+            is_blacklist = FALSE
+        )
+    )
+
+union = unfiltered_union %>%
+    filter(!is_unreliable, !is_blacklist) 
+
+union_no_zero = union %>%
+    filter(fire_score > 0, atac_score > 0) %>%
+    mutate(
+        atac_percentile = percent_rank(atac_score),
+        fire_percentile = percent_rank(fire_score),
+    )
+union
+```
+
+
+
+```{r}
+z=union_no_zero %>%
+    ggplot(aes(x=fire_frac, y=atac_score)) +
+    geom_hex() + scale_fill_distiller("", palette = "Spectral", trans="log10") +
+    geom_smooth(method="lm", se=FALSE) +
+    stat_cor() +
+    my_grid() +
+    #scale_y_continuous(trans="log10")+
+    #scale_x_continuous(trans="log10")+
+    labs(
+        x = "FIRE score",
+        y = "ATAC score"
+    )
+my_ggsave("Figures/fire-vs-atac-2024-11-01.pdf")
+```
+```{r}
+sum(fire_df$is_atac_peak)
+```
+
+```{r}
+z=union_no_zero %>%
+    ggplot(aes(x=fire_percentile, y=atac_percentile)) +
+    geom_hex(bins=50) + scale_fill_distiller("", palette = "Spectral", trans="log10") +
+    geom_smooth(method="lm", se=FALSE) +
+    stat_cor() +
+    geom_xsidehistogram(bins=50) +
+    geom_ysidehistogram(bins=50) +
+    #scale_x_continuous(trans="log10")+
+    my_grid() +
+    labs(
+        x = "FIRE score",
+        y = "ATAC score"
+    )
+my_ggsave("Figures/fire-vs-atac-percentile.pdf")
+```
+
+```{r}
+z=union_no_zero %>%
+    ggplot(aes(x=fire_score, y=fire_percentile)) +
+    geom_point() +
+    my_grid() +
+    labs(
+        x = "FIRE score",
+        y = "FIRE percentile"
+    )
+my_ggsave("Figures/fire-score-vs-percentile.pdf")
+```
+
+```{r}
+z=union_no_zero %>%
+    ggplot(aes(x=atac_score, y=atac_percentile)) +
+    geom_point() +
+    my_grid() +
+    labs(
+        x = "ATAC score",
+        y = "ATAC percentile"
+    )
+my_ggsave("Figures/atac-score-vs-percentile.pdf")
+```

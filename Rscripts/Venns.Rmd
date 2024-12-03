@@ -137,16 +137,17 @@ asdf = filtered_data_for_ven %>%
     select(-chrom,-start,-end, -is_ctcf_peak) %>%
     filter(call != "CTCF") %>%
     ggvenn()
-my_ggsave("Figures/venn-fire-dnase.pdf")
+my_ggsave("Figures/venn-fire-dnase-2024-11-01.pdf")
 asdf = filtered_data_for_ven %>%
     select(-chrom,-start,-end) %>%
     ggvenn() 
-my_ggsave("Figures/venn-fire-dnase-ctcf.pdf", height=10, width=10)
+my_ggsave("Figures/venn-fire-dnase-ctcf-2024-11-01.pdf", height=10, width=10)
 ```
 
 ```{r}
 asdf = filtered_data_for_ven %>%
     select(-is_ctcf_peak) %>% filter(call != "CTCF") %>%
+    #select(-is_dnase_peak) %>% filter(call != "DNase") %>%
     pivot_longer(
         cols = starts_with("is_"),
         names_to = "peak_type",
@@ -177,19 +178,24 @@ asdf = filtered_data_for_ven %>%
     xlab("") +
     scale_y_continuous("Peak count", label=comma) +
     theme_minimal_hgrid(font_size=6)
-my_ggsave("Figures/upset-fire-dnase-ctcf.pdf", height=4, width=4)
+my_ggsave("Figures/upset-fire-dnase-ctcf-2024-11-01.pdf", height=4, width=4)
 ```
 
 ```{r}
-# merge columsn into a new one that is a names list
- %>%
-    head()
-
 ```
 
 ```{r}
-
+library(valr)
 sum(fire_df$is_ctcf_peak)
+sum(fire_df$is_atac_peak)
+
+z=fire_df %>%
+    tibble() %>%
+    valr::bed_map(
+        atac_peaks %>% tibble,
+        kis_atac_peak = n() > 0
+    ) 
+table(z$kis_atac_peak)
 ```
 
 

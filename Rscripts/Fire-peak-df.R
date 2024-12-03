@@ -243,6 +243,8 @@ if(F){
     con <- pipe("pigz -p8 > Rdata/df.fire-peaks.gz", "wb")
     save(
         fire_df,
+        unreliable_df,
+        blacklist_df,
         encode,
         dnase_peaks,
         atac_peaks,

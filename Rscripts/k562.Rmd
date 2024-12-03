@@ -1,0 +1,187 @@
+```{r}
+source("Rscripts/Fire-peak-df.R")
+```
+
+# read in data
+```{r}
+k562_fire_all=my_read_bed("../FIREv2.0/Revision-1/just-more-samples/results/K562-PS00075/FDR-peaks/FDR.track.bed.gz")
+k562_dnase_peaks = my_read_bed("data/k562-data/K562.peaks.bed.gz")
+k562_dnase_signal = my_read_bed("data/k562-data/K562.signal.bg.gz")
+```
+
+# overlap with all fire data
+```{r}
+k562_fire_all = k562_fire_all %>%
+    bed_map(
+        k562_dnase_peaks,
+        is_dnase_peak = n() > 0
+    ) %>%
+    bed_map(
+        k562_dnase_signal,
+        dnase_max = max(V4)
+    ) %>%
+    replace_na(
+        list(
+            is_dnase_peak = FALSE,
+            dnase_max = 0
+        )
+    ) 
+```
+
+# overlap with peaks
+```{r}
+k562 = my_read_bed(
+    "../FIREv2.0/Revision-1/just-more-samples/results/K562-PS00075/FDR-peaks/FDR-FIRE-peaks.bed.gz"
+    ) %>%
+    bed_map(
+        k562_dnase_peaks,
+        is_dnase_peak = n() > 0
+    ) %>%
+    bed_map(
+        k562_dnase_signal,
+        dnase_max = max(V4)
+    ) %>%
+    replace_na(
+        list(
+            is_dnase_peak = FALSE,
+            dnase_max = 0
+        )
+    ) 
+k562 = k562 %>% mutate(
+    psize=end-start,
+    size_group = cut(psize, breaks=c(0,200,250,Inf)),
+    ) %>%
+    group_by(size_group, is_dnase_peak) %>%
+    mutate(
+        size_group_label = paste(size_group, " n=", comma(n()), sep="")
+    )
+```
+
+```{r}
+k562_dnase_or_fire = bind_rows(
+    list(
+        k562_dnase_peaks %>% select(chrom,start,end),
+        k562 %>% select(chrom,start,end)
+    )
+) %>% valr::bed_merge() %>%
+bed_map(
+    k562_dnase_signal,
+    dnase_max = max(V4)
+) %>%
+bed_map(
+    k562_dnase_peaks,
+    is_dnase_peak = n() > 0
+) %>%
+bed_map(
+    k562_fire_all,
+    fire_max=max(fire_coverage/coverage*100),
+) %>%
+bed_map(
+    k562,
+    is_fire_peak = n() > 0,
+) %>%
+replace_na(
+    list(
+        dnase_max = 0,
+        fire_max = 0,
+        is_dnase_peak = FALSE,
+        is_fire_peak = FALSE
+    )
+)
+k562_dnase_or_fire
+```
+
+# dnase
+```{r}
+k562 %>%
+    filter(dnase_max > 0) %>%
+    filter(is_dnase_peak) %>%
+    ggplot(aes(y=score, x=dnase_max)) +
+    geom_hex(bins=30) +
+    scale_fill_distiller("", palette = "Spectral", trans="log10") +
+    stat_cor()+
+    #geom_smooth(method="lm", se=F) +
+    #facet_wrap(~autosome, ncol=2)+
+    #facet_wrap(~group)+
+    scale_x_continuous(
+        "DNase peak signal",
+        labels=comma,
+        trans="log10",
+    ) +
+    annotation_logticks(side="b") +
+    scale_y_continuous(
+        "FIRE peak score",
+        labels=comma,
+        #trans="log10",
+    ) + 
+    my_grid() +
+    theme(
+        aspect.ratio=1,
+    )
+my_ggsave("Figures/k562-DNase-vs-FIRE.pdf", height=3, width=4)
+```
+
+# union fire and dnase peaks 
+```{r}
+k562_dnase_or_fire %>%
+    ggplot(aes(y=fire_max, x=dnase_max+0.001)) +
+    geom_hex(bins=30) +
+    scale_fill_distiller("", palette = "Spectral", trans="log10") +
+    stat_cor()+
+    #geom_smooth(method="lm", se=F) +
+    #facet_wrap(~autosome, ncol=2)+
+    #facet_wrap(~group)+
+    scale_x_continuous(
+        "DNase peak signal",
+        labels=comma,
+        trans="log10",
+    ) +
+    annotation_logticks(side="b") +
+    scale_y_continuous(
+        "FIRE peak score",
+        labels=comma,
+        #trans="log10",
+    ) + 
+    #facet_row(~paste0(is_dnase_peak, is_fire_peak)) +
+    my_grid() +
+    theme(
+        aspect.ratio=1,
+    )
+my_ggsave("Figures/k562-all-DNase-vs-FIRE.pdf", height=2, width=3)
+    ```
+
+
+# dnase by peak size
+```{r}
+z = k562 %>%
+ filter(dnase_max > 0) %>%
+    filter(is_dnase_peak) %>%
+    ggplot(aes(y=score, x=dnase_max)) +
+    geom_hex(bins=30) +
+    scale_fill_distiller("", palette = "Spectral", trans="log10") +
+    stat_cor()+
+    #geom_smooth(method="lm", se=F) +
+    #facet_wrap(~autosome, ncol=2)+
+    #facet_wrap(~group)+
+    scale_x_continuous(
+        "DNase peak signal",
+        labels=comma,
+        trans="log10",
+    ) +
+    annotation_logticks(side="b") +
+    facet_row(~size_group_label) +
+    scale_y_continuous(
+        "FIRE peak score",
+        labels=comma,
+        #trans="log10",
+    ) + 
+    my_grid() +
+    theme(
+        aspect.ratio=1,
+    )
+        
+my_ggsave("Figures/k562-FIRE-vs-DNase-by-size.pdf", height=2, width=6)
+```
+
+```{r}
+```

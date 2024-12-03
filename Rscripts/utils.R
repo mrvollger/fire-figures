@@ -490,7 +490,8 @@ my_read_bed = function(...){
     names[names == "end"] = "end.other"
     names[1:3] = c("chrom", "start", "end")
     colnames(df) = names
-    df
+    # sort by chrom then start then end
+    df = df[order(df$chrom, df$start, df$end)]
 }
 
 logit_e = function(x, a=1, b=0) {

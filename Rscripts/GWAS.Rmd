@@ -4,16 +4,36 @@ source("Rscripts/Fire-peak-df.R")
 
 
 ```{r}
-gwas.catalog = fread("revision-1/GWAS/download-my-own-catalogs/full", sep="\t", quote="") %>%
+if(F){
+    gwas.catalog = fread("revision-1/GWAS/download-my-own-catalogs/full", sep="\t", quote="") %>%
     mutate(
         chrom = paste0("chr", CHR_ID),
         start = as.numeric(CHR_POS)-1,
         end = start+1,
         rsID=as.numeric(str_replace(SNPS, "^rs", ""))
     )
-    # %>%
+} else {
+    gwas.catalog = fread(
+        "revision-1/GWAS/download-my-own-catalogs/PICS2-GWAScat-2024-09-20.simple.tbl.gz", 
+        sep="\t",
+    ) %>% 
+    # split Linked_position_hg38 on the colon and then whitespace
+    mutate(
+        rsID=as.numeric(str_replace(rsID, "^rs", "")),
+        chrom=CHROM,
+        start=as.numeric(POS)-1,
+        end=start+1,
+    ) %>%
+    filter(
+        !is.na(rsID),
+        !is.na(chrom),
+        !is.na(start),
+        !is.na(end),
+    )
+}
+
 small.gwas.catalog = gwas.catalog %>%
-    select(`DISEASE/TRAIT`, rsID, REGION, MAPPED_GENE) %>%
+    select(`DISEASE/TRAIT`, rsID, MAPPED_GENE) %>%
     unique
 
 all.gwas.sites = gwas.catalog %>%
@@ -21,118 +41,425 @@ all.gwas.sites = gwas.catalog %>%
     unique
 all.gwas.sites
 gwas.catalog
+
+
+gwas.vcf = fread(cmd='bcftools view revision-1/GWAS/echtvar/results/gm12878.risk.vcf.gz | grep -v "^##"') %>%
+    mutate(
+        chrom=`#CHROM`,
+        start = POS-1,
+        end = POS
+    ) %>% 
+    mutate(
+        rsID=str_extract(INFO, "rsID=[0-9]+") %>% str_replace("rsID=", "") %>% as.numeric,
+        MAF=str_extract(
+            INFO,
+             "FREQ=1000Genomes:[0-9]+.[0-9]+"
+        ) %>% str_replace("FREQ=1000Genomes:", "") %>% as.numeric
+    ) 
+gwas.vcf
+
+gwas.het.vcf = fread(cmd='bcftools view revision-1/GWAS/echtvar/results/gm12878.het.risk.vcf.gz | grep -v "^##"') %>%
+    mutate(
+        chrom=`#CHROM`,
+        start = POS-1,
+        end = POS
+    ) %>% 
+    mutate(
+        rsID=str_extract(INFO, "rsID=[0-9]+") %>% str_replace("rsID=", "") %>% as.numeric,
+        MAF=str_extract(
+            INFO,
+             "FREQ=1000Genomes:[0-9]+.[0-9]+"
+        ) %>% str_replace("FREQ=1000Genomes:", "") %>% as.numeric
+    ) 
+gwas.het.vcf
 ```
 
+# get haplotype selective peaks with shuffles that have the genetic variants
 ```{r}
-gwas.df = fread("revision-1/GWAS/hap-selective-peaks/results/closest.bed") %>%
+#
+# RUN THE FIRST BLOCKS OF GENETIC-VARIANTS-IN-HAP-PEAKS.RMD
+# TO GET THE GM12878 VCFS 
+#
+set.seed(1) 
+hap_peaks=fire_df %>%
     mutate(
-        distance = case_when(
-            distance < 0 ~ max(distance),
-            TRUE ~ distance
+        autosome = case_when(
+            chrom %in% FAI_NO_SEX$name ~ "Autosome",
+            chrom == "chrX" ~ "X",
+            TRUE ~ "Other"    
         ),
-        rsID=str_extract(INFO, "rsID=[0-9]+") %>% str_replace("rsID=", "") %>% as.numeric,
-        p_distance = pmin(distance, 1e6),
+    ) %>%
+    filter(!is.na(diff)) %>%
+    filter(p_adjust<=0.05 & autosome=="Autosome" ) %>%
+    data.table
+
+rand_hap_peaks = list()
+for(i in 1:10){
+    rand_hap_peaks[[i]] = bed_shuffle(hap_peaks, FAI)
+}
+rand_hap_peaks = bind_rows(rand_hap_peaks, .id="shuffle_n")
+
+hap_peaks_with_null = bind_rows(
+    list(
+        real=hap_peaks,
+        random=sample_n(fire_df, nrow(hap_peaks)),
+        shuffle=rand_hap_peaks,
+        all_fire = fire_df
+    ),
+    .id="type"
+    ) %>%
+    bed_map(vcf_df,
+        n_SNVs = n(),
+    ) %>% 
+    bed_map(pbsv_ends,
+        n_SVs = n(),
+    ) %>%
+    replace_na(list(
+        n_SNVs=0,
+        n_SVs=0
+    )) %>%
+    mutate(
+        str_imprinted = case_when(
+            imprinted == TRUE ~ "imprinted",
+            TRUE ~ "not-imprinted",
+        ),
+        has_SVs = case_when(
+            n_SVs > 0 ~ "has SV(s)",
+            TRUE ~ "no SVs",
+        ),
+        n_variants = n_SNVs+n_SVs,
+        has_variants = case_when(
+            n_variants > 0 ~ "With variants",
+            TRUE ~ "Without variants",
+        ),
+    ) %>%
+    mutate(
+        group = case_when(
+            type == "real" ~ "real",
+            type == "random" ~ "random",
+            type == "all_fire" ~ "fire",
+            TRUE ~ paste0("shuffle", shuffle_n)
+        ),
+    ) %>%
+    select(
+        -score_H1, -score_H2,
+        -FDR_H1, -FDR_H2,
+        -FIRE_size_mean, -FIRE_size_ssd,
+        -log_FDR_H1, -log_FDR_H2,
+        -FIRE_end_ssd, -FIRE_start_ssd,
+    ) %>%
+    # move chrom start and end to the front
+    relocate(chrom, start, end) %>%
+    data.table 
+
+colnames(hap_peaks_with_null)
+ 
+# hap_peaks_with_null = bind_rows(
+#     list(
+#         all = hap_peaks_with_null,
+#         split = hap_peaks_with_null[group=="real"] %>% mutate(
+#                     group = paste0(group, " (", has_variants, ")")
+#                 ) 
+#     ),
+#     .id = "split"
+#     ) 
+
+unique(hap_peaks_with_null$group)
+hap_peaks_with_null %>% group_by(type) %>% summarise(
+    sum(n_SVs),
+    mean(n_SVs>0),
+    sum(n_SNVs),
+    mean(n_SNVs>0),
+)
+hap_peaks_with_null %>% filter(group=="real") %>% summarise(
+    min(p_adjust),
+    max(p_adjust),
+)
+table(hap_peaks_with_null$group)
+```
+
+# get closest with bedtools
+```{r}
+system("mkdir -p temp/R/")
+keep_n_closest = 5
+# for each group write a different bed file
+hap_peaks_with_null %>%
+    arrange(chrom, start, end) %>%
+    select(chrom, start, end, ID, group) %>%
+    group_by(group) %>%
+    # group is not included in .x so adding a copy that will be written to the file
+    mutate(group2=group) %>%
+    group_walk(
+        ~ fwrite(.x, 
+            file=paste0("temp/R/", .y$group, ".bed"),
+            sep="\t",
+            quote=FALSE,
+            row.names=FALSE,
+            col.names=FALSE,
+        )
+    )
+
+gwas.het.vcf %>%
+    relocate("chrom", "start", "end") %>%
+    arrange(chrom, start, end) %>%
+    select(chrom, start, end, rsID) %>%
+    #head() %>% #select(chrom, start, end, rsID) %>%
+    fwrite(
+        "temp/R/gwas.het.vcf",
+        sep="\t",
+        quote=FALSE,
+        row.names=FALSE,
+        col.names=FALSE,
+    )
+
+closest = fread(
+    cmd=glue(
+        "bedtools closest -d -t first -k {keep_n_closest} -a temp/R/gwas.het.vcf -b temp/R/*.bed"
+    )
+)
+colnames(closest) = c(
+    "chrom", "start", "end", "rsID",
+    "group_number",
+    "chrom.fire", "start.fire", "end.fire", "ID", "group",
+    "distance"
+)
+closest=closest %>%
+    merge(gwas.het.vcf %>% select(-ID), by=c("chrom", "start", "end", "rsID")) %>%
+    merge(
+        hap_peaks_with_null %>% select(-chrom, -start, -end),
+        by=c("ID", "group"),
+        suffixes=c("", ".fire")
+    ) %>%
+    select(-group_number) %>% 
+    # rank the closeness of each gwas to the closest peak
+    dplyr::group_by(chrom, start, end, rsID, group) %>%
+    dplyr::arrange(distance, .by_group = TRUE) %>%
+    dplyr::mutate(
+        rank = 1:n()
+    ) %>%
+    ungroup() %>%
+    arrange(chrom, start, end, rsID, group, rank) %>%
+    filter(
+        rank == 1 | group == "real"
+    ) %>%
+    filter(rank <= keep_n_closest) %>%
+    data.table 
+
+table(closest$rank)
+length(unique(hap_peaks_with_null$group))
+```
+
+# for every gwas find the closest haplotype selective peak
+```{r}
+all.gwas.df = bind_rows(list(
+        all = closest,
+        split = closest[group=="real"] %>% mutate(
+                    group = paste0(group, " (", has_variants, ")")
+        )),
+        .id = "split"
+    ) %>%
+    mutate(
         real = case_when(
             group == "real" ~ "haplotype-selective\nFIRE peaks",
+            group == "real (With variants)" ~ "haplotype-selective\nFIRE peaks (with variants)",
+            group == "real (Without variants)"~"haplotype-selective\nFIRE peaks (without variants)",
             group == "random" ~ "random sample of\nFIRE peaks",
+            group == "fire" ~ "all FIRE peaks",
             TRUE ~ "random intervals"
         ),
-    ) 
+        distance = abs(distance),
+    ) %>%
+    mutate(
+        linetype = case_when(
+            real == "random intervals" | grepl("real \\(", group) ~ 2,
+            TRUE ~ 1
+        ),
+        linetype = factor(linetype, levels=c(1,2))
+    ) %>%
+    data.table
+
+gwas.df = all.gwas.df %>% filter(group!="fire")
 
 my_colors = c(
     "haplotype-selective\nFIRE peaks" = "darkred",
+    "haplotype-selective\nFIRE peaks (without variants)" = alpha("darkorange", 0.4),
+    "haplotype-selective\nFIRE peaks (with variants)" = alpha("brown", 0.4),
     "random sample of\nFIRE peaks" = "darkblue",
-    "random intervals" = "darkgray")
+    "random intervals" = alpha("darkgray", 0.25))
 gwas.df$real = factor(gwas.df$real, levels=names(my_colors))
 
+unique(gwas.df$real)
+```
+
+
+# make a cumulative distribution of the distance from the gwas to the closest haplotype selective peak
+```{r}
+mhc = "chr6:28,510,120-33,480,577"
+mhc_start = 28510120
+mhc_end = 33480577
+expected_count = gwas.df %>% filter(group=="real" & rank == 1) %>% nrow
+
+gwas.df %>% group_by(group, real) %>% summarise(n())
+
 cum.dist.gwas = gwas.df %>%
-    group_by(group, real, distance) %>%
+    expand_grid(without_mhc = c(TRUE, FALSE)) %>%
+    filter(
+        !(without_mhc == TRUE & chrom == "chr6" & start > mhc_start & start < mhc_end)
+    ) %>%
+    group_by(group, real, linetype, without_mhc, rank) %>%
+    mutate(
+        multiplier = expected_count/n()
+    ) %>% 
+    group_by(group, real, distance, multiplier, linetype, without_mhc, rank) %>%
     summarise(
         count = n()
     ) %>%
+    ungroup() %>%
+    group_by(group, real, linetype, without_mhc, rank) %>%
     arrange(distance) %>%
     mutate(
-        cumcount = cumsum(count)
+        cumcount = cumsum(count),
+        cumcount_adjusted = cumsum(count*multiplier),
+        fraction = cumcount_adjusted/expected_count,
     )
+
 head(cum.dist.gwas,20)
+
+cum.dist.gwas %>% 
+    filter(real != "random intervals") %>%
+    group_by(group, real, without_mhc, rank) %>%
+    summarise(
+        max_distance = max(distance),
+        max_fraction = max(fraction),
+        n(),
+        unique(multiplier)
+    ) %>% print(n=50)
+```
+
+# plot of the cumulative count of GWAS peaks as a function of distance
+# TODO split this into two ideas, one for hap-selective with variants, and one for hap-sel without
+```{r}
+cum.dist.gwas %>%
+    filter(rank == 1) %>%
+    filter(distance < 50e3) %>%
+    ggplot(
+        aes(x=distance, color=real, group=group)    
+    ) +
+    geom_line(aes(y=fraction, linetype=linetype)) +
+    scale_x_continuous(
+        "Distance from GWAS variant to the closest FIRE peak",
+        label=comma
+    ) +
+    scale_y_continuous(
+        "Cumulative fraction of GWAS variants\n",
+    ) +
+    scale_color_manual("",values=my_colors) +
+    facet_row(~without_mhc) +
+    guides(color=guide_legend(nrow=3), linetype="none")+
+    theme_cowplot(font_size=8)+
+    theme(
+        legend.position = "top",
+        legend.text = element_text(size=6),
+    )
+my_ggsave("Figures/distance-from-GWAS-to-closest-hap-selective-cumulative.pdf", height=3, width=5)
+```
+
+```{r}
+cum.dist.gwas %>%
+    filter(group == "real" | group == "random") %>%
+    filter(distance < 50e3) %>%
+    ggplot(
+        aes(x=distance, color=real, group=paste(group, rank))    
+    ) +
+    geom_line(aes(y=fraction, linetype=linetype, alpha=5*1/rank)) +
+    scale_x_continuous(
+        "Distance from GWAS variant to the closest FIRE peak",
+        label=comma
+    ) +
+    scale_y_continuous(
+        "Cumulative fraction of GWAS variants\n",
+    ) +
+    scale_color_manual("",values=my_colors) +
+    facet_row(~without_mhc) +
+    guides(color=guide_legend(nrow=3), linetype="none")+
+    theme_cowplot(font_size=8)+
+    theme(
+        legend.position = "top",
+        legend.text = element_text(size=6),
+    )
+my_ggsave("Figures/distance-from-GWAS-to-closest-n-hap-selective-cumulative.pdf", height=3, width=5)
+```
+
+```{r}
+table(cum.dist.gwas$group)
+z=cum.dist.gwas %>%
+    filter(rank == 1) %>%
+    ungroup %>%
+    filter( `group` %in% c("real", "random") ) %>%
+    select(without_mhc, group, distance, fraction) %>%
+    pivot_wider(
+        names_from=c("group"),
+        values_from=c("fraction"),
+    ) %>%
+    drop_na %>%
+    filter(real-random > 0 ) %>%
+    filter(distance < 55e3) %>%
+    ggplot(aes(x=distance, y=real-random, color=without_mhc)) +
+    geom_line() +
+    scale_x_continuous(
+        "Distance from GWAS variant to the closest FIRE peak",
+        label=comma
+    ) +
+    scale_y_continuous(
+        "Cumulative delta between haplotype-selective\nFIRE peaks and random FIRE peaks",
+        limits = c(0,NA),
+    ) +
+    my_grid() +
+    theme(
+        legend.position = "top",
+    )
+my_ggsave("Figures/distance-from-GWAS-to-closest-hap-selective-cumulative-diff.pdf", height=3, width=3)
 ```
 
 
 ```{r}
 z=gwas.df %>%
-    ggplot(aes(x=p_distance+1, color=real, group=group)) +
+    filter(rank == 1) %>%
+    #filter(split=="all") %>%
+    ggplot(aes(x=distance+1, color=real, group=group)) +
     geom_step(stat="bin", bins=100, alpha=0.75)+
     scale_x_continuous(trans='log10', label=comma) +
+    annotation_logticks(sides="b") +
     #scale_y_continuous(trans='log10') +
     facet_zoom(
-        xy = distance < 1e5,
+        xy = distance < 25e3,
         horizontal = FALSE
-    ) +
-    theme_cowplot()
-my_ggsave("Figures/distance-from-GWAS-to-closest-hap-selective.pdf", height=4, width=5)
-```
-
-# plot of the cumulative count of GWAS peaks as a function of distance
-```{r}
-cum.dist.gwas %>%
-    ggplot(
-        aes(x=distance, color=real, group=group)
-    ) +
-    geom_line(aes(y=cumcount)) +
-    scale_x_continuous(
-        "Distance from GWAS variant to the closest\nhaplotype-selective FIRE peak",
-        #trans='log10',
-        label=comma
-    ) +
-    #scale_y_continuous(trans='log10') +
-    scale_y_continuous(
-        "Cumulative count of GWAS variants",
-        label=comma
     ) +
     scale_color_manual("",values=my_colors) +
-    #scale_linetype_manual("",values=c("solid", "dashed", "solid")) +
-    facet_zoom(
-        xy = distance < 50e3,
-        horizontal = FALSE
-    ) +
-    guides(color=guide_legend(ncol=1))+
-    theme_cowplot(font_size=8)+
-    theme(
-        #legend.position = "top",
-        legend.text = element_text(size=6),
-    )
-my_ggsave("Figures/distance-from-GWAS-to-closest-hap-selective-cumulative.pdf", height=3, width=4)
+    theme_cowplot(font_size=8)
+my_ggsave("Figures/distance-from-GWAS-to-closest-hap-selective.pdf", height=3, width=5)
 ```
 
+# plot the MAF of the close GWAS variants
 ```{r}
 gwas.df %>%
-    group_by(group, real, group_count) %>%
-    filter(distance==0) %>%
-    summarise(
-        n()
-    )
-
-gwas.df %>%
-    group_by(group, real) %>%
-    filter(distance==0) %>%
+    filter(real=="haplotype-selective\nFIRE peaks" | real=="random sample of\nFIRE peaks") %>%
+    filter(rank == 1) %>%
     filter(
-        cumcount == max(cumcount)
+        distance < 40e3 | real == "random sample of\nFIRE peaks"
     ) %>%
-    select(
-        group, real, cumcount
-    )
+    ggplot(aes(x=MAF, color=real)) +
+    geom_density() +
+    scale_x_continuous("1,000 genomes minor allele frequency of GWAS variants\nwith a near (< 40 kbp) FIRE peak") +
+    scale_y_continuous("Density") +
+    scale_color_manual("",values=my_colors) +
+    theme_cowplot(font_size=8)
+my_ggsave("Figures/MAF-of-GWAS-closest-to-hap-selective-peaks.pdf", height=3, width=5)
 ```
-
 
 
 ```{r}
 sum(!fire_df$is_atac_peak)
-gwas.vcf = fread(cmd="bcftools view -H revision-1/GWAS/echtvar/results/gm12878.risk.vcf.gz") %>%
-    mutate(
-        chrom=V1,
-        start = V2-1,
-        end = V2
-    )
 
 gwas.validation = bind_rows(
     list(
@@ -166,7 +493,7 @@ gwas.validation
 ```
 
 ```{r}
-gwas.validation %>%
+long.gwas.validation = gwas.validation %>%
     mutate(
         case = case_when(
             shuffled =="shuffled" ~ "shuffled",
@@ -178,13 +505,53 @@ gwas.validation %>%
         c(gwas_per_kbp_of_fire_peak, all_gwas_per_kbp_of_fire_peak),
         names_to="gwas_type",
         values_to="gwas_per_kbp_of_fire_peak"
+    ) 
+
+
+gwas.validation %>%
+    mutate(
+        peaks_without_gwas = n_peaks-gwas_in_peaks,
     ) %>%
+    select(is_atac_peak, shuffled, peaks_without_gwas, peaks_with_gwas) %>%
+    pivot_wider(
+        names_from=c("is_atac_peak", "shuffled"),
+        values_from=c("peaks_without_gwas", "peaks_with_gwas")
+    ) %>%
+    mutate(
+        p_value_atac = fisher.test(matrix(
+            c(
+                peaks_with_gwas_TRUE_shuffled,
+                peaks_without_gwas_TRUE_shuffled,
+                peaks_with_gwas_TRUE_real,
+                peaks_without_gwas_TRUE_real
+            ), nrow=2))$p.value,
+        p_value_not_atac = fisher.test(matrix(
+            c(
+                peaks_with_gwas_TRUE_shuffled,
+                peaks_without_gwas_TRUE_shuffled,
+                peaks_with_gwas_FALSE_real,
+                peaks_without_gwas_FALSE_real
+            ), nrow=2))$p.value
+    )
+
+
+
+long.gwas.validation %>%
     ggplot(aes(y=case, x=gwas_per_kbp_of_fire_peak, fill=is_atac_peak)) +
     geom_bar(stat="identity", position="dodge", width=0.6) +
+    geom_text(
+        aes(label=round(gwas_per_kbp_of_fire_peak, 4)),
+        position=position_dodge(width=0.6),
+        vjust=0.5,
+        size=1, 
+        hjust=-0.1,
+    )+
     scale_x_continuous("GWAS variants per 1,000 bp of FIRE peak")+
     ylab("")+
     facet_col(~gwas_type, scales="free_x")+
     scale_fill_manual("", values=c("TRUE"="black", "FALSE"="darkred"))+
+    # turn off clipping
+    coord_cartesian(clip="off")+
     # drop the fill guide
     guides(fill="none")+
     my_grid()
@@ -195,14 +562,18 @@ my_ggsave("Figures/gwas-per-kbp-of-fire-peak.pdf", height=2, width=4)
 
 ```{r}
 colnames(gwas.df)
-to_investigate = gwas.df %>% 
-    filter(real == "haplotype-selective\nFIRE peaks") %>%
-    filter(group=="real") %>%
-    filter(distance < 20e3) %>%
-    select(1:10, rsID, distance, peak_start, peak_end, fire_coverage, coverage, FDR, fire_coverage_H1, coverage_H1, fire_coverage_H2, coverage_H2, p_adjust, diff) %>%
-    merge(small.gwas.catalog, by="rsID", all.x=TRUE) 
+to_investigate = all.gwas.df %>% 
+    filter(real == "haplotype-selective\nFIRE peaks" | real == "all FIRE peaks") %>%
+    #filter(group=="real") %>%
+    filter(distance < 40e3) %>%
+    select(1:10, rsID, distance, real, start.fire, end.fire, fire_coverage.fire, coverage.fire, FDR.fire, fire_coverage_H1.fire, coverage_H1.fire, fire_coverage_H2.fire, coverage_H2.fire, p_adjust.fire, diff.fire,) %>%
+    merge(small.gwas.catalog, by="rsID", all.x=TRUE) %>%
+    arrange(`#CHROM`, POS, rsID)
     
+table(to_investigate$real)
+
 to_investigate %>%
+    filter(real == "haplotype-selective\nFIRE peaks") %>%
     fwrite(
         "revision-1/GWAS/hap-selective-peaks/results/results-to-investigate.tsv",
         sep="\t",
@@ -211,9 +582,209 @@ to_investigate %>%
         na="NA"
     )
 
-diseases = sort(table(to_investigate$`DISEASE/TRAIT`))
+diseases = sort(table(to_investigate %>% filter("haplotype-selective\nFIRE peaks"==real) %>% select(`DISEASE/TRAIT`)))
 diseases[diseases> 10]
 length(diseases)
 length(diseases[diseases> 1])
 length(diseases[diseases> 10])
+```
+
+```{r}
+cum.dist.gwas %>%
+    filter(distance == 0) %>%
+    filter(!grepl("shuffle", group)) %>%
+    select(real, distance, cumcount, cumcount_adjusted)
+```
+
+
+# TODO test for enrichment of terms in this list vs the whole catalog 
+# the null will be:
+# any het gwas that is within ~20kbp of any FIRE peak
+```{r}
+disease_with_enrichment = to_investigate %>%
+    group_by(real, `DISEASE/TRAIT`) %>%
+    summarise(count = n()) %>%
+    filter(count > 1) %>%
+    pivot_wider(names_from=real, values_from=count) %>%
+    rename(
+        hap_count = `haplotype-selective\nFIRE peaks`,
+        all_count = `all FIRE peaks`
+    ) %>%
+    mutate(
+        all_count_total = sum(all_count, na.rm=TRUE),
+        hap_count_total = sum(hap_count, na.rm=TRUE),
+    ) %>%
+    drop_na %>%
+    rowwise %>%
+    mutate(
+        hap_per = 100*hap_count/hap_count_total,
+        all_per = 100*all_count/all_count_total,
+        p_value = fisher.test(matrix(c(hap_count, hap_count_total-hap_count, all_count, all_count_total-all_count), nrow=2), 
+            #alternative = "greater"
+        )$p.value
+    ) %>%
+    ungroup() %>%
+    mutate(
+        p_adjust = p.adjust(p_value, method="BH"),
+        log2fc = log2(hap_per) - log2(all_per) 
+    ) %>%
+    data.table 
+
+disease_with_enrichment %>%
+    filter(p_value < 0.05)  %>%
+    filter(p_adjust < 0.05) %>%
+    #filter(hap_count > 2) %>%
+    arrange(p_value)
+
+```
+
+
+# make a volcano plot of the enrichment of diseases in the hap-selective peaks
+```{r}
+min_adjust_p_value = disease_with_enrichment %>% filter(p_adjust < 0.05) %>% pull(p_value) %>% max 
+xlims = disease_with_enrichment %>% pull(log2fc) %>% range
+xlims[1] = floor(xlims[1])
+xlims[2] = ceiling(xlims[2])
+xlims
+disease_with_enrichment %>%
+    ggplot(
+        aes(
+            x=log2fc,
+            y=-log10(p_value), 
+            color = (p_adjust < 0.05) 
+        )
+    ) +
+    geom_vline(xintercept=c(-2,2), linetype="dashed", color="darkblue") +
+    geom_segment(
+        y=-log10(min_adjust_p_value),
+        yend=-log10(min_adjust_p_value),
+        x=xlims[1]-0.5,
+        xend=xlims[2]+0.5,
+        linetype="dashed", color="darkblue"
+    ) +
+    geom_point(
+        aes(
+            #size=hap_count
+        ),
+        size=0.5,
+    ) +
+    geom_text_repel(
+        data = . %>% filter(p_adjust<0.05 & abs(log2fc) > 2),
+        aes(label=`DISEASE/TRAIT`),
+        size=1.5,
+        min.segment.length=0,
+        segment.color=alpha("black", 0.75),
+        segment.size=0.25,
+        color="black",
+        max.overlaps=Inf,
+        direction="y",
+        #nudge_y=10,
+        force_pull=0.1,
+        force=10,
+        seed=42,
+        xlim  = c(xlims[2]+1, NA), hjust=0,
+        #xlim  = c(10, NA), hjust=1,
+    ) + 
+    scale_x_continuous(
+        "log2 fold change in enrichment for disease association",
+        limits=c(NA,15),
+        breaks=seq(xlims[1], xlims[2], 1)
+    ) +
+    scale_y_continuous(
+        "-log10(p-value)",
+    ) +
+    scale_size_area("count", trans="log10") +
+    scale_color_manual(
+        "Significant", 
+        values=c("TRUE"=alpha("darkred", 0.6), "FALSE"=alpha("gray", 0.2))
+    ) +
+    theme_cowplot(
+        font_size=8,
+        #base_size=6
+    ) +
+    theme(
+        legend.position = "none",
+    )
+my_ggsave("Figures/disease-enrichment-volcano.pdf", height=2, width=4)
+```
+
+# make a table for Immunoglobulin A vasculitis
+```{r}
+to_investigate %>%
+    filter(real == "haplotype-selective\nFIRE peaks") %>%
+    filter(`DISEASE/TRAIT` == "Immunoglobulin A vasculitis") %>%
+    mutate(
+        start = POS-1,
+        end = POS,
+    ) %>%
+    relocate(
+        `#CHROM`, start, end, rsID, REF, ALT, 
+    ) %>% 
+    select(
+        -POS,
+        -split, 
+        -real,
+        -FORMAT,
+        -INFO,
+    ) %>%
+    arrange(`#CHROM`, start, end) %>%
+    fwrite(
+        "revision-1/GWAS/hap-selective-peaks/results/Immunoglobulin-A-vasculitis.bed",
+        sep="\t",
+        quote=FALSE,
+        row.names=FALSE,
+        na="NA"
+    )
+```
+
+
+# make tables to share of hap peaks
+```{r}
+table(hap_peaks_with_null$type)
+
+hap_peaks_with_null %>%
+    filter(type=="all_fire") %>%
+    select(-type) %>%
+    arrange(chrom,start,end) %>%
+    rename(
+        `#chrom` = chrom,
+    ) %>%
+    fwrite(
+        file="revision-1/GWAS/hap-selective-peaks/results/annotated-fire-peaks.bed.gz",
+        sep="\t",
+        quote=FALSE,
+        row.names=FALSE,
+        na="NA"
+    )
+
+hap_peaks_with_null %>%
+    filter(type=="real") %>%
+    select(-type) %>%
+    arrange(chrom,start,end) %>%
+    rename(
+        `#chrom` = chrom,
+    ) %>%
+    fwrite(
+        file="revision-1/GWAS/hap-selective-peaks/results/annotated-hap-selective-peaks.bed.gz",
+        sep="\t",
+        quote=FALSE,
+        row.names=FALSE,
+        na="NA"
+    )
+
+hap_peaks_with_null %>%
+    filter(type=="real") %>%
+    filter(has_variants == "With variants") %>%
+    select(-type) %>%
+    arrange(chrom,start,end) %>%
+    rename(
+        `#chrom` = chrom,
+    ) %>%
+    fwrite(
+        file="revision-1/GWAS/hap-selective-peaks/results/annotated-hap-selective-peaks-with-variants.bed.gz",
+        sep="\t",
+        quote=FALSE,
+        row.names=FALSE,
+        na="NA"
+    )
 ```

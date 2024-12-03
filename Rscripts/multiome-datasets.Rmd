@@ -1,0 +1,291 @@
+```{r}
+source("Rscripts/Fire-peak-df.R")
+```
+
+```{r}
+all_hap_multiome = my_read_bed("../FIREv2.0/Revision-1/multiome-fibroblasts/hap-selective/all.tbl.gz") %>%
+    bed_map(
+        imprinted,
+        is_imprinted = n() > 0
+    ) %>%
+    replace_na(
+        list(
+            is_imprinted = FALSE
+        )
+    ) %>%
+    mutate(
+        chrom = factor(chrom, levels=FAI$chrom)
+    ) %>%
+    mutate(
+        factor_n_snvs = case_when(
+            n_snvs >= 5 ~ "5+",
+            TRUE ~ as.character(n_snvs)
+        ),
+        has_snv = n_snvs > 0
+    ) %>%
+    group_by(sample) %>%
+    mutate(
+        sample_count = n()
+    ) %>%
+    data.table
+
+hap_multiome = all_hap_multiome %>%
+    filter(p_adjust <= 0.05)
+```
+
+```{r}
+z=hap_multiome %>%
+    ggplot(aes(y=sample, fill=factor_n_snvs))+
+    geom_bar()+
+    scale_x_continuous(
+        "# of hap-selective FIRE peaks",
+        label=comma
+    ) +
+    scale_fill_brewer(
+        "# of SNVs",
+        palette="Dark2"
+    ) +
+    my_grid() +
+    facet_col(~is_imprinted)+
+    theme(
+        legend.position = "top"
+    )
+my_ggsave("Figures/multiome-hap-sel-n-snvs.pdf", height=4, width=4)
+```
+
+```{r}
+z=hap_multiome %>%
+    ggplot(aes(y=sample, fill=factor_n_snvs))+
+    geom_bar(position="fill")+
+    scale_x_continuous(
+        "Fraction of hap-selective FIRE peaks",
+        label=comma
+    ) +
+    scale_fill_brewer(
+        "# of SNVs",
+        palette="Dark2"
+    ) +
+    facet_col(~is_imprinted)+
+    my_grid() +
+    theme(
+        legend.position = "top"
+    )
+my_ggsave("Figures/multiome-hap-sel-n-snvs-fill.pdf", height=4, width=4)
+```
+
+
+# density plot of where these are happening faceted by chrom
+```{r}
+z=hap_multiome %>%
+    #filter(sample=="PS00401") %>%
+    filter(!is_imprinted)   %>%
+    ggplot(aes(x=start, fill=n_snvs>0))+
+    geom_histogram(alpha=0.85, binwidth=2e6)+
+    geom_rug()+
+    scale_x_continuous("Position", label=comma)+
+    my_grid()+
+    scale_fill_brewer(
+        "has SNV",
+        palette="Dark2"
+    ) +
+    facet_col(~chrom, strip.position="left")
+my_ggsave("Figures/multiome-hap-sel-density.pdf", height=8, width=10)
+```
+
+
+# faceted by sample a histogram of the diff between maternal and paternal
+```{r}
+z=hap_multiome %>%
+    filter(sample_count>100) %>%
+    #filter(is_imprinted) %>%
+    ggplot(aes(x=diff, fill=n_snvs>0))+
+    geom_histogram(alpha=0.85, binwidth=0.01)+
+    geom_rug()+
+    scale_x_continuous("Paternal - Maternal", label=comma)+
+    my_grid()+
+    scale_fill_brewer(
+        "has SNV",
+        palette="Dark2"
+    ) +
+    facet_col(~sample, strip.position="left", scales="free_y")
+my_ggsave("Figures/multiome-hap-sel-diff.pdf", height=8, width=10)
+```
+
+
+# make a qq plot
+```{r}
+z = all_hap_multiome %>%
+    filter(p_value<1) %>%
+    group_by(has_snv) %>%
+    sample_n(20e3) %>%
+    ggplot(aes(sample=p_value, color=has_snv))+
+    stat_qq(
+        alpha=0.25, 
+        size = 0.25, 
+        distribution = qunif
+    ) +
+    stat_qq_line(
+        #color="darkred", 
+        linetype="dashed", 
+        distribution = qunif
+    ) +
+    #scale_x_continuous("p-value", trans="log10") +
+    scale_x_continuous(
+        "Theoretical quantiles",
+    ) +
+    scale_y_continuous(
+        "p-value",
+        breaks = seq(0, 1, 0.05),
+    ) +
+    scale_color_manual(
+        "has SNV",
+        values=c("darkblue", "darkorange")
+    ) +
+    facet_row(~has_snv) +
+    coord_cartesian(ylim=c(0, 1)) +
+    my_grid() +
+    theme(
+        legend.position = "top"
+    )
+my_ggsave("Figures/multiome-hap-sel-qq.pdf", height=3, width=5)
+
+quantile(all_hap_multiome$p_value, probs = seq(0, 1, 0.25))
+```
+
+```{r}
+ks.test(all_hap_multiome$p_value, "punif", 0, 1) 
+
+## histogram of p-values
+z = all_hap_multiome %>%
+    filter(p_value<1) %>%
+    #sample_n(10e3) %>%
+    ggplot(aes(x=p_value, fill=has_snv))+
+    geom_histogram(binwidth=0.01)+
+    scale_x_continuous("p-value",
+        label=comma,
+    ) +
+    scale_fill_manual(
+        "has SNV",
+        values=c("darkblue", "darkorange")
+    ) +
+    facet_col(~has_snv, scales="free_y")+
+    my_grid() +
+    theme(
+        legend.position = "top"
+    )
+my_ggsave("Figures/multiome-hap-sel-p-histogram.pdf", height=3, width=5)
+
+```
+
+# p_value vs p_adjust
+```{r}
+z = all_hap_multiome %>%
+    ggplot(aes(x=p_value, y=p_adjust))+
+    geom_hex(bins=40)+
+    my_grid()+
+    scale_x_continuous("p-value", trans="log10")+
+    scale_y_continuous("p-adjust", trans="log10")
+my_ggsave("Figures/multiome-hap-sel-p-vs-p-adj.pdf", height=4, width=4)
+```
+
+
+
+# autocorrelation 
+```{r}
+# results/PS00392/PS00392-fire-v0.1.0-qc.tbl.gz
+
+afc = fread(cmd="zcat ../FIREv2.0/Revision-1/multiome-fibroblasts/all.qc.tbl.gz | rg -w 'm6a_acf' ")
+colnames(afc) = c("statistic", "value", "count", "sample")
+afc = afc %>% 
+    filter(value > 30) %>%
+    mutate(
+        sample = str_replace(sample, "-fire.*", "")
+    ) %>%
+    dplyr::group_by(sample) %>%
+    mutate(
+        diff=max(count[value>75]) - min(count[value>75]),
+        is_small = diff < 0.01,
+    ) 
+
+z=afc %>%
+    ggplot(aes(x=value, y=count, color=sample))+
+    #geom_point()+
+    geom_line(alpha=0.5)+
+    scale_y_continuous("Autocoorelation") +
+    facet_col(~is_small)+
+    my_grid()
+my_ggsave("Figures/multiome-autocorrelation.pdf", height=4, width=6)
+
+
+afc %>%
+    group_by(sample) %>%
+    summarise(
+        diff=min(diff)
+    ) %>%
+    arrange(diff)
+```
+
+# m6a_ratio
+```{r}
+max_val = 0.25
+
+m6a_ratio = fread(cmd="zcat ../FIREv2.0/Revision-1/multiome-fibroblasts/all.qc.tbl.gz | rg -w 'm6a_ratio' ")
+colnames(m6a_ratio) = c("statistic", "value", "count", "sample")
+m6a_ratio = m6a_ratio  %>%
+    mutate(
+        sample = str_replace(sample, "-fire.*", "")
+    ) %>%
+    group_by(sample) %>%
+    mutate(
+        zmedian = matrixStats::weightedMedian(value, count),
+    ) %>%
+    ungroup() %>%
+    arrange(zmedian) %>%
+    mutate(
+        sample = factor(sample, levels=unique(sample))
+    )
+
+max(m6a_ratio$count)
+
+
+# histogram of m6a_ratio per sample
+z=m6a_ratio %>%
+    mutate(
+        value = case_when(
+            value > max_val ~ max_val,
+            TRUE ~ value
+        )
+    ) %>%
+    ggplot(aes(x=value, group=sample, weight=count))+
+    geom_histogram(binwidth=0.001)+
+    scale_x_continuous("m6a_ratio")+
+    scale_y_continuous("Count", label=comma)+
+    scale_fill_brewer("Sample", palette="Dark2")+
+    facet_wrap(~sample, scales="free_y")+
+    my_grid()
+my_ggsave("Figures/multiome-m6a-ratio.pdf", height=8, width=8)
+
+
+# histogram of m6a_ratio per sample
+z=m6a_ratio %>%
+    mutate(
+        value = case_when(
+            value > max_val ~ max_val,
+            TRUE ~ value
+        )
+    ) %>%
+    ggplot(aes(y=sample, x=value, weight=count))+
+    geom_violin(
+        scale="width",
+        draw_quantiles = c(0.25, 0.5, 0.75),
+        linewidth=0.25
+    )+
+    #scale_y_continuous("Count", label=comma)+
+    scale_x_continuous(
+        "m6a/A",
+        limits=c(0, 1.01*max_val),
+        label=percent
+    )+
+    my_grid()
+my_ggsave("Figures/multiome-m6a-ratio-violin.pdf", height=4, width=4)
+```
