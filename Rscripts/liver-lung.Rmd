@@ -1,0 +1,254 @@
+```{r}
+source("Rscripts/Fire-peak-df.R")
+```
+
+```{r}
+vcff= "/mmfs1/gscratch/stergachislab/mvollger/projects/FIREv2.0/Revision-1/liver-lung/vcfs/ST001-lung.vcf.norm.bcf.gz"
+vcf_lung = fread(cmd=glue("bcftools view -f 'PASS' -i 'GT=\"HET\"' {vcff} | grep -v ^##"))  %>% 
+    mutate(start = POS-1) %>%
+    rename(
+        chrom="#CHROM",
+        end=POS
+    )
+
+```{r}
+
+```{r}
+lung_peaks = my_read_bed("results/ST001-lung/hap1-vs-hap2/FIRE.hap.differences.bed")
+lung_track = my_read_bed("../FIREv2.0/results/ST001-lung/FDR-peaks/FDR.track.bed.gz")
+liver_peaks = my_read_bed("results/ST001-liver/hap1-vs-hap2/FIRE.hap.differences.bed")
+liver_track = my_read_bed("../FIREv2.0/results/ST001-liver/FDR-peaks/FDR.track.bed.gz")
+lung_hap_peaks = lung_peaks %>% filter(p_adjust <= 0.05)
+```
+
+
+#
+# do hap specific peaks in BL change in Tumor
+#
+
+# data
+```{r}
+tissue_peaks = bind_rows(
+    list(
+        "Liver"=lung_peaks,
+        "Lung"=liver_peaks
+    ),
+    .id = "source"
+)
+```
+
+# intersection + analysis
+```{r}
+min_hap_cov = 10
+filtered_tissue_peaks = tissue_peaks %>%
+    filter(coverage_H1 > min_hap_cov, coverage_H2 > min_hap_cov) %>%
+    mutate(
+        hap1_per = fire_coverage_H1/coverage_H1,
+        hap2_per = fire_coverage_H2/coverage_H2,
+        diff = hap1_per - hap2_per, 
+    ) 
+sum(is.na(filtered_tissue_peaks$diff))
+
+tissue_peaks_compare_df = filtered_tissue_peaks %>%
+    bed_map(
+        lung_hap_peaks,
+        lung_diff = diff[which.min(abs(diff))],
+        nn = n(),
+    ) %>%
+    filter(!is.na(lung_diff)) %>%
+    bed_map(
+        imprinted, 
+        is_imprinted = n()>0,
+    ) %>%
+    bed_map(
+        vcf_lung,
+        is_het = n() > 0,
+        n_snvs = n(),
+    ) %>%
+    replace_na(list(is_het=FALSE, is_imprinted=FALSE))
+
+table(tissue_peaks_compare_df$source)
+```
+
+
+```{r}
+asdf = tissue_peaks_compare_df %>%
+    select(chrom, start, end, diff, blood_diff, is_imprinted, is_het, source) %>%
+    #expand_grid(fake=seq(1)) %>%
+    filter(!(is_het & is_imprinted)) %>%
+    mutate(
+        is_het = case_when(
+            is_het ~ "Overlaps heterozygous variant",
+            TRUE ~ "Homozygous",
+        ),
+        diff_diffs = abs(diff - blood_diff),
+        large_t_diff = diff_diffs > 0.5,
+    ) %>%
+    ggplot(aes(x=blood_diff, y=diff, color=is_imprinted)) +
+    geom_abline(slope=1, intercept=0, color="red", linetype="dashed") +
+    geom_abline(slope=1, intercept=-0.5, color="gray", linetype="dashed") +
+    geom_abline(slope=1, intercept=0.5, color="gray", linetype="dashed") +
+    geom_point(alpha=0.75, size=0.5) +
+    geom_smooth(method="lm", se=FALSE, alpha=0.1, linewidth=0.1) +
+    geom_text_repel(
+        data = . %>% filter(large_t_diff),
+        aes(
+            label=paste0(chrom, ":", start, "-", end),
+        ),
+        size = 1,
+        min.segment.length = 0,
+    ) + 
+    stat_cor(size=2) + 
+    facet_grid(source~is_het) +
+    scale_y_continuous(
+        "Percent accessibility difference in tumor/replicate peaks\n(filtered for peaks with 10x coverage in both haplotypes)",
+        limits=c(-1,1), labels=percent) +
+    scale_x_continuous(
+        "Percent accessibility difference in blood haplotype-specific peaks",
+        limits=c(-1,1), labels=percent) +
+    scale_color_manual(
+        "Imprinted",
+        values=c("black", "darkorange"),
+    )+
+    # force equal aspect ratio
+    coord_fixed() +
+    theme_minimal_grid(font_size=6) +
+    theme(legend.position="top")
+my_ggsave("Figures/lung-liver-hap-peaks.pdf", height=4, width=4)
+```
+
+same plot as above but passage A vs B for tumor
+```{r}
+t_a = tissue_peaks_compare_df %>% 
+    filter(source=="Lung") %>%
+    select(chrom, start, end, diff, is_imprinted, is_het, source) %>%
+    bed_map(
+        tissue_peaks_compare_df %>% filter(source=="Liver"),
+        diff_liver = diff[which.min(abs(diff))],
+        nn = n(),
+    ) 
+
+asdf = t_a %>%
+    #expand_grid(fake=seq(1)) %>%
+    filter(!(is_het & is_imprinted)) %>%
+    mutate(
+        is_het = case_when(
+            is_het ~ "Overlaps heterozygous variant",
+            TRUE ~ "Homozygous",
+        ),
+        diff_diffs = abs(diff - diff_liver),
+        large_t_diff = diff_diffs > 0.5,
+    ) %>%
+    ggplot(aes(x=diff_b, y=diff, color=is_imprinted)) +
+    geom_abline(slope=1, intercept=0, color="red", linetype="dashed") +
+    geom_abline(slope=1, intercept=-0.5, color="gray", linetype="dashed") +
+    geom_abline(slope=1, intercept=0.5, color="gray", linetype="dashed") +
+    geom_point(alpha=0.75, size=0.5) +
+    geom_smooth(method="lm", se=FALSE, alpha=0.1, linewidth=0.1) +
+    geom_text_repel(
+        data = . %>% filter(large_t_diff),
+        aes(
+            label=paste0(chrom, ":", start, "-", end),
+        ),
+        size = 1,
+        min.segment.length = 0,
+    ) + 
+    stat_cor(size=2) + 
+    facet_grid(source~is_het) +
+    scale_y_continuous(
+        "Percent accessibility difference in tumor passage A",
+        limits=c(-1,1), labels=percent) +
+    scale_x_continuous(
+        "Percent accessibility difference in tumor passage B",
+        limits=c(-1,1), labels=percent) +
+    scale_color_manual(
+        "Imprinted",
+        values=c("black", "darkorange"),
+    )+
+    # force equal aspect ratio
+    coord_fixed() +
+    theme_minimal_grid(font_size=6) +
+    theme(legend.position="top")
+
+my_ggsave("Figures/liver-lung-hap-peaks.pdf", height=3, width=5)
+```
+
+
+Thought re COLO829T. Are the 0 variant BL-Hap-specific sites enriched for sites that show more haplotype-specific heterogeneity (i.e. less well buffered).
+Make a histogram of the absolute(haplotype difference in COLO829T for all peaks that are present in BOTH COLO829BL and COLO829T)
+Add to histogram absolute(haplotype difference in COLO829T for peaks that are COLO829BL haplotype-specific and also present in COLO829T and lack a variant)
+(edited)
+you have already showed that there is no correlation between the COLO829T and COLO829BL haplotype-specificity, but this would show that these sites are "less buffered" such that they are more likely to diverge over time in their haplotype-specificity compared to other peaks around the genome
+
+```{r}
+min_frac_acc = min(lung_peaks %>% filter(p_adjust <= 0.05) %>% pull(frac_acc))
+
+# get the peaks that are present in both COLO829BL and COLO829T
+liver_and_lung = lung_peaks %>%
+    bed_map(
+        liver_peaks %>%
+            filter(coverage_H1 >= 10, coverage_H2 >= 10),
+        is_liver = n() > 0,
+        liver_diff = diff[which.min(abs(diff))],
+        n_liver = n(),
+    ) %>%
+    filter(!is.na(is_liver)) %>%
+    bed_map(
+        imprinted, 
+        is_imprinted = n()>0,
+    ) %>%
+    bed_map(
+        vcf_lung,
+        is_het = n() > 0,
+    ) %>%
+    replace_na(list(is_het=FALSE, is_imprinted=FALSE))
+
+ppd = liver_and_lung %>%
+    filter(!is_het) %>%
+    mutate(
+        type_diff = abs(diff - tumor_diff),
+        hap_selective = case_when(
+            p_adjust <= 0.05 ~ "Haplotype selective",
+            TRUE ~ "Non-haplotype selective",
+        )
+    ) 
+table(ppd$hap_selective)
+colo_compare_df %>% filter(!is_het, source=="Tumor") %>% nrow()
+ppd %>%
+    ggplot(aes(x=type_diff, fill=hap_selective)) +
+    geom_histogram(
+        aes(y=after_stat(density)),
+        binwidth=0.05, alpha=0.75,
+        color="black",
+        position="identity",
+    ) +
+    #geom_density(alpha=0.75)+
+    scale_fill_manual(
+        "",
+        values=c("darkred","skyblue"),
+    ) +
+    geom_text(
+        data = . %>% dplyr::group_by(hap_selective) %>% dplyr::summarise(stat=mean(type_diff)),
+        aes(x=stat, y=-.2, 
+            label=glue("mean={100*round(stat, 3)}"), color=hap_selective),
+        size=2.5,
+    ) +
+    scale_x_continuous(
+        glue(
+            "abs[(Blood H1 - H2 accessibility) - (Tumor H1 - H2 accessibility)]\n",
+            "(shared homozygous peaks with at least 10x coverage in both haplotypes)"
+        ),
+        label=percent,
+        limits=c(0,1),
+    ) +
+    scale_color_manual(
+        "",
+        values=c("darkred", "skyblue"),
+    ) +
+    #facet_col(~hap_selective, scale="free_y") +
+    my_grid() +
+    theme(
+        legend.position="top"
+    )
+my_ggsave("Figures/liver-lung-histogram-of-hap-difference.pdf", height=3, width=4)
+```

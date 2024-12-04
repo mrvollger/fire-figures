@@ -298,15 +298,36 @@ library(TxDb.Hsapiens.UCSC.hg38.knownGene)
 txdb <- TxDb.Hsapiens.UCSC.hg38.knownGene
 
 # In the output, qSample is the name of queryPeak and qLen is the the number of peaks in queryPeak. N_OL is the number of overlap between queryPeak and targetPeak.
+#system("mkdir -p data/GEO-hg38")
+#downloadGEObedFiles(genome="hg38", destDir="data/GEO-hg38")
 
-downloadGEObedFiles(genome="hg38", destDir="data/GEO-hg38")
+files = Sys.glob("data/GEO-hg38/*H3K*narrowPeak.gz")
+files
+hap_multiome %>%
+    filter(has_snv) %>%
+    select(chrom, start, end) %>%
+    fwrite("temp/has_snv.bed", sep="\t", col.names=FALSE)
 
-enrichPeakOverlap(queryPeak     = files[[5]],
-                  targetPeak    = unlist(files[1:4]),
+hap_multiome %>%
+    filter(!has_snv) %>%
+    select(chrom, start, end) %>%
+    fwrite("temp/no_snv.bed", sep="\t", col.names=FALSE)
+
+my_files = c("temp/has_snv.bed", "temp/no_snv.bed")
+
+rtn = enrichPeakOverlap(queryPeak     = my_files[[1]],
+                  targetPeak    = unlist(files),
                   TxDb          = txdb,
                   pAdjustMethod = "BH",
-                  nShuffle      = 50,
-                  chainFile     = NULL,
-                  verbose       = FALSE)
+                  nShuffle      = 1000,
+                  verbose       = TRUE,
+                  #verbose       = FALSE,
+                  chainFile     = NULL
+                  )
+```
+
+```{r}
+as_tibble(rtn) %>%
+    filter(p.adjust < 0.05) 
 
 ```

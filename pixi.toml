@@ -7,7 +7,11 @@ platforms = ["linux-64"]
 version = "0.1.0"
 
 [tasks]
-setup = "R -e 'BiocManager::install(\"GenomeInfoDb\"); BiocManager::install(\"BSgenome.Hsapiens.UCSC.hg38\")' "
+ginfo = {cmd="R -e 'BiocManager::install(\"GenomeInfoDb\")'"}
+hg38 = {cmd="R -e 'BiocManager::install(\"BSgenome.Hsapiens.UCSC.hg38\")'", depends_on="ginfo"}
+txdb = {cmd="R -e 'BiocManager::install(c(\"TxDb.Hsapiens.UCSC.hg19.knownGene\", \"TxDb.Hsapiens.UCSC.hg38.knownGene\"))'", depends_on="hg38"}
+godb = {cmd="R -e 'BiocManager::install(c(\"GO.db\", \"HDO.db\"))'", depends_on="txdb"}
+setup = {depends_on = ["godb"] }
 
 
 [dependencies]
@@ -61,3 +65,5 @@ r-pals = ">=1.9,<2"
 r-biocmanager = "*"
 "bioconductor-bsgenome.hsapiens.ucsc.hg38" = ">=1.4.5,<2"
 r-hexbin = ">=1.28.5,<2"
+"bioconductor-txdb.hsapiens.ucsc.hg19.knowngene" = ">=3.2.2,<4"
+"bioconductor-go.db" = ">=3.18.0,<4"
