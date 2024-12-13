@@ -5,7 +5,7 @@ source("Rscripts/Fire-peak-df.R")
 
 ```{r}
 if(F){
-    gwas.catalog = fread("revision-1/GWAS/download-my-own-catalogs/full", sep="\t", quote="") %>%
+    gwas.catalog = fread("Revision-1/GWAS/download-my-own-catalogs/full", sep="\t", quote="") %>%
     mutate(
         chrom = paste0("chr", CHR_ID),
         start = as.numeric(CHR_POS)-1,
@@ -14,7 +14,7 @@ if(F){
     )
 } else {
     gwas.catalog = fread(
-        "revision-1/GWAS/download-my-own-catalogs/PICS2-GWAScat-2024-09-20.simple.tbl.gz", 
+        "Revision-1/GWAS/download-my-own-catalogs/PICS2-GWAScat-2024-09-20.simple.tbl.gz", 
         sep="\t",
     ) %>% 
     # split Linked_position_hg38 on the colon and then whitespace
@@ -43,7 +43,7 @@ all.gwas.sites
 gwas.catalog
 
 
-gwas.vcf = fread(cmd='bcftools view revision-1/GWAS/echtvar/results/gm12878.risk.vcf.gz | grep -v "^##"') %>%
+gwas.vcf = fread(cmd='bcftools view Revision-1/GWAS/echtvar/results/gm12878.risk.vcf.gz | grep -v "^##"') %>%
     mutate(
         chrom=`#CHROM`,
         start = POS-1,
@@ -58,7 +58,7 @@ gwas.vcf = fread(cmd='bcftools view revision-1/GWAS/echtvar/results/gm12878.risk
     ) 
 gwas.vcf
 
-gwas.het.vcf = fread(cmd='bcftools view revision-1/GWAS/echtvar/results/gm12878.het.risk.vcf.gz | grep -v "^##"') %>%
+gwas.het.vcf = fread(cmd='bcftools view Revision-1/GWAS/echtvar/results/gm12878.het.risk.vcf.gz | grep -v "^##"') %>%
     mutate(
         chrom=`#CHROM`,
         start = POS-1,
@@ -458,13 +458,39 @@ my_ggsave("Figures/MAF-of-GWAS-closest-to-hap-selective-peaks.pdf", height=3, wi
 ```
 
 
+#
+# test enrichment of GWAS in peaks
+#
+# test enrichment in atac peaks
+#
 ```{r}
 sum(!fire_df$is_atac_peak)
+dnase_peaks
+sr_only_peaks = bind_rows(
+        list(
+            atac=atac_peaks %>% mutate(is_atac_peak=T), 
+            dnase=dnase_peaks %>% mutate(is_dnase_peak=T)
+        )
+    ) %>%
+    bed_map(
+        fire_df,
+        fire_count = n()
+    ) %>%
+    replace_na(
+        list(
+            fire_count=0,
+            is_atac_peak=FALSE,
+            is_dnase_peak=FALSE
+            )
+        ) %>%
+    filter(fire_count==0)
 
 gwas.validation = bind_rows(
     list(
         real = fire_df,
-        shuffled = bed_shuffle(fire_df, FAI, excl=fire_df) %>% mutate(is_atac_peak=TRUE)
+        shuffled = bed_shuffle(fire_df, FAI, excl=fire_df) %>% mutate(is_atac_peak=TRUE),
+        atac = sr_only_peaks %>% filter(is_atac_peak==TRUE),
+        dnase = sr_only_peaks %>% filter(is_dnase_peak==TRUE) 
     ),
     .id="shuffled"
     ) %>%
@@ -497,9 +523,12 @@ long.gwas.validation = gwas.validation %>%
     mutate(
         case = case_when(
             shuffled =="shuffled" ~ "shuffled",
+            shuffled =="atac" ~ "ATAC-seq only peaks",
+            shuffled =="dnase" ~ "DNase-seq only peaks",
             is_atac_peak ~ "FIRE peak with ATAC-seq",
             TRUE ~ "FIRE peak without ATAC-seq"
-        )
+        ),
+        is_shuffled = shuffled=="shuffled",
     ) %>%
     pivot_longer(
         c(gwas_per_kbp_of_fire_peak, all_gwas_per_kbp_of_fire_peak),
@@ -507,40 +536,44 @@ long.gwas.validation = gwas.validation %>%
         values_to="gwas_per_kbp_of_fire_peak"
     ) 
 
-
-gwas.validation %>%
-    mutate(
-        peaks_without_gwas = n_peaks-gwas_in_peaks,
-    ) %>%
-    select(is_atac_peak, shuffled, peaks_without_gwas, peaks_with_gwas) %>%
+wide_cols = c("case", "n_peaks", "peaks_with_gwas", "gwas_in_peaks",
+        "peaks_with_all_gwas", "all_gwas_in_peaks", "gwas_per_kbp_of_fire_peak", "peaks_without_gwas")
+after_wide_cols = paste0(wide_cols, "_","FALSE")
+after_wide_cols_2 = paste0(wide_cols, "_","TRUE")
+wide.with.shuffle.gwas.validation = long.gwas.validation %>%
+    filter(gwas_type != "all_gwas_per_kbp_of_fire_peak") %>%
+    mutate(peaks_without_gwas = n_peaks-gwas_in_peaks) %>%
+    select(-is_atac_peak, -shuffled, -gwas_type) %>%
     pivot_wider(
-        names_from=c("is_atac_peak", "shuffled"),
-        values_from=c("peaks_without_gwas", "peaks_with_gwas")
+        names_from = c(is_shuffled),
+        values_from = wide_cols,
+        values_fn = list
     ) %>%
+    unnest(after_wide_cols) %>%
+    unnest(after_wide_cols_2) %>%
+    rowwise() %>%
+    filter(n_peaks_TRUE > 0) %>%
     mutate(
-        p_value_atac = fisher.test(matrix(
-            c(
-                peaks_with_gwas_TRUE_shuffled,
-                peaks_without_gwas_TRUE_shuffled,
-                peaks_with_gwas_TRUE_real,
-                peaks_without_gwas_TRUE_real
-            ), nrow=2))$p.value,
-        p_value_not_atac = fisher.test(matrix(
-            c(
-                peaks_with_gwas_TRUE_shuffled,
-                peaks_without_gwas_TRUE_shuffled,
-                peaks_with_gwas_FALSE_real,
-                peaks_without_gwas_FALSE_real
-            ), nrow=2))$p.value
-    )
+        test = (fisher.test(matrix(c(
+            peaks_with_gwas_TRUE,
+            peaks_without_gwas_TRUE,
+            peaks_with_gwas_FALSE,
+            peaks_without_gwas_FALSE
+        ), nrow=2))$p.value),
+    ) %>%
+    ungroup %>% 
+    data.table
+wide.with.shuffle.gwas.validation
 
 
 
 long.gwas.validation %>%
-    ggplot(aes(y=case, x=gwas_per_kbp_of_fire_peak, fill=is_atac_peak)) +
+    ggplot(aes(y=case, x=gwas_per_kbp_of_fire_peak, fill=case)) +
     geom_bar(stat="identity", position="dodge", width=0.6) +
     geom_text(
-        aes(label=round(gwas_per_kbp_of_fire_peak, 4)),
+        aes(
+            label=paste0(round(gwas_per_kbp_of_fire_peak, 4), "\nn=", peaks_with_all_gwas)
+        ),
         position=position_dodge(width=0.6),
         vjust=0.5,
         size=1, 
@@ -549,7 +582,16 @@ long.gwas.validation %>%
     scale_x_continuous("GWAS variants per 1,000 bp of FIRE peak")+
     ylab("")+
     facet_col(~gwas_type, scales="free_x")+
-    scale_fill_manual("", values=c("TRUE"="black", "FALSE"="darkred"))+
+    scale_fill_manual("", 
+        values=c(
+            "FIRE peak without ATAC-seq"="red",
+            "FIRE peak with ATAC-seq"="darkred",
+            "DNase-seq only peaks"="darkblue",
+            "ATAC-seq only peaks"="darkblue",
+            "shuffled"="darkgray"
+            #NULL="darkgray"
+        )
+    )+
     # turn off clipping
     coord_cartesian(clip="off")+
     # drop the fill guide
@@ -558,8 +600,49 @@ long.gwas.validation %>%
 my_ggsave("Figures/gwas-per-kbp-of-fire-peak.pdf", height=2, width=4)
 ```
 
+```{r}
+z=wide.with.shuffle.gwas.validation %>%
+    ggplot(
+        aes(y=case_FALSE,
+            x=gwas_per_kbp_of_fire_peak_FALSE/gwas_per_kbp_of_fire_peak_TRUE, 
+            fill=case_FALSE
+            )
+    ) + 
+    geom_bar(stat="identity", position="dodge", width=0.6) +
+    geom_text(
+        aes(
+            label=paste0(round(5, 4), "\nn=", peaks_with_all_gwas_FALSE)
+        ),
+        position=position_dodge(width=0.6),
+        vjust=0.5,
+        size=1, 
+        hjust=-0.1,
+    )+
+    scale_x_continuous("")+
+    ylab("")+
+    scale_fill_manual("", 
+        values=c(
+            "FIRE peak without ATAC-seq"="red",
+            "FIRE peak with ATAC-seq"="darkred",
+            "DNase-seq only peaks"="darkblue",
+            "ATAC-seq only peaks"="darkblue",
+            "shuffled"="darkgray"
+            #NULL="darkgray"
+        )
+    )+
+    # turn off clipping
+    coord_cartesian(clip="off")+
+    # drop the fill guide
+    guides(fill="none")+
+    my_grid()
+my_ggsave("Figures/gwas-per-kbp-of-fire-peak-enrichment.pdf", height=2, width=4)
+
+```
 
 
+#
+#
+#
 ```{r}
 colnames(gwas.df)
 to_investigate = all.gwas.df %>% 

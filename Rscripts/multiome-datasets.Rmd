@@ -2,8 +2,54 @@
 source("Rscripts/Fire-peak-df.R")
 ```
 
+
+```{r}
+metadata=fread("/mmfs1/gscratch/stergachislab/mvollger/projects/FIREv2.0/Revision-1/multiome-fibroblasts/chrY.calls.tbl", header=FALSE) %>%
+    mutate(
+        sample = gsub(".*/", "", V1),
+        sample = gsub(".vcf", "", sample),
+        has_parental = grepl("haplotagged", sample),
+        sample = gsub(".haplotagged", "", sample),
+        sample = gsub(".phased", "", sample),
+        sex = case_when(
+            V2 > 10e3 ~ "Male",
+            TRUE ~ "Female"
+        ),
+        n_chrY = V2
+    ) %>%
+    select(-V1, -V2)
+
+z=metadata %>%
+    ggplot(
+        aes(
+            y=n_chrY,
+            #x=sex,
+            x="sample",
+            color=sex,
+        )
+    ) +
+    scale_color_manual(
+        "",
+        values=c("darkblue", "darkorange")
+    )+
+    scale_y_continuous(
+        "Number of chrY SNVs",
+        label=comma
+    ) +
+    xlab("") +
+    geom_jitter(
+        width=0.25,
+        height=0,
+    ) +
+    my_grid() +
+    theme()
+my_ggsave("Figures/multiome-sex.pdf", height=3, width=3)
+```
+
 ```{r}
 all_hap_multiome = my_read_bed("../FIREv2.0/Revision-1/multiome-fibroblasts/hap-selective/all.tbl.gz") %>%
+    merge(metadata, by="sample") %>%
+    filter(has_parental) %>%
     bed_map(
         imprinted,
         is_imprinted = n() > 0
@@ -30,6 +76,7 @@ all_hap_multiome = my_read_bed("../FIREv2.0/Revision-1/multiome-fibroblasts/hap-
     data.table
 
 hap_multiome = all_hap_multiome %>%
+    filter(autosome == "Autosome") %>%
     filter(p_adjust <= 0.05)
 ```
 
@@ -46,7 +93,7 @@ z=hap_multiome %>%
         palette="Dark2"
     ) +
     my_grid() +
-    facet_col(~is_imprinted)+
+    facet_col(~is_imprinted, scale="free_x")+
     theme(
         legend.position = "top"
     )
@@ -80,7 +127,7 @@ z=hap_multiome %>%
     #filter(sample=="PS00401") %>%
     filter(!is_imprinted)   %>%
     ggplot(aes(x=start, fill=n_snvs>0))+
-    geom_histogram(alpha=0.85, binwidth=2e6)+
+    geom_histogram(alpha=0.85, binwidth=1e6)+
     geom_rug()+
     scale_x_continuous("Position", label=comma)+
     my_grid()+
@@ -180,6 +227,7 @@ my_ggsave("Figures/multiome-hap-sel-p-histogram.pdf", height=3, width=5)
 # p_value vs p_adjust
 ```{r}
 z = all_hap_multiome %>%
+    sample_n(1e6) %>%
     ggplot(aes(x=p_value, y=p_adjust))+
     geom_hex(bins=40)+
     my_grid()+
@@ -193,7 +241,6 @@ my_ggsave("Figures/multiome-hap-sel-p-vs-p-adj.pdf", height=4, width=4)
 # autocorrelation 
 ```{r}
 # results/PS00392/PS00392-fire-v0.1.0-qc.tbl.gz
-
 afc = fread(cmd="zcat ../FIREv2.0/Revision-1/multiome-fibroblasts/all.qc.tbl.gz | rg -w 'm6a_acf' ")
 colnames(afc) = c("statistic", "value", "count", "sample")
 afc = afc %>% 
@@ -205,7 +252,9 @@ afc = afc %>%
     mutate(
         diff=max(count[value>75]) - min(count[value>75]),
         is_small = diff < 0.01,
-    ) 
+    )  %>%
+    merge(metadata, by="sample") %>%
+    filter(has_parental)
 
 z=afc %>%
     ggplot(aes(x=value, y=count, color=sample))+
@@ -243,7 +292,9 @@ m6a_ratio = m6a_ratio  %>%
     arrange(zmedian) %>%
     mutate(
         sample = factor(sample, levels=unique(sample))
-    )
+    ) %>%
+    merge(metadata, by="sample") %>%
+    filter(has_parental)
 
 max(m6a_ratio$count)
 
@@ -328,6 +379,275 @@ rtn = enrichPeakOverlap(queryPeak     = my_files[[1]],
 
 ```{r}
 as_tibble(rtn) %>%
-    filter(p.adjust < 0.05) 
+    filter(p.adjust < 0.05)
+
+```
+
+
+# test X skewing of X
+```{r}
+
+test_x_skew = all_hap_multiome %>%
+    filter(has_parental) %>%
+    filter(sex=="Female") %>%
+    group_by(sample, has_parental) %>%
+    summarise(
+        x_skew = 100*mean(abs(diff[chrom == "chrX"])),
+        x_skew_sd = sd(diff[chrom == "chrX"]),
+        x_skew_m = median(diff[chrom == "chrX"]),
+        coverage = median(coverage),
+        n_hap_selective_snv = sum(p_adjust <= 0.05 & autosome == "Autosome" & n_snvs > 0),
+        n_hap_selective_no_snv = sum(p_adjust <= 0.05 & autosome == "Autosome" & n_snvs == 0),
+        total_hap_selective = sum(p_adjust <= 0.05 & autosome == "Autosome"),
+    ) %>%
+    pivot_longer(
+        c(n_hap_selective_snv, n_hap_selective_no_snv),
+        values_to="n_hap_selective",
+        names_to="has_snv"
+    ) 
+test_x_skew
+test_x_skew 
+
+z=test_x_skew %>%
+    filter(has_snv=="n_hap_selective_snv") %>%
+    #filter(coverage < 65 ) %>%
+    #filter(x_skew < 30) %>%
+    ggplot(aes(x=coverage, y=total_hap_selective))+
+    geom_point()+
+    geom_smooth(method="lm", se=F, color="darkred", linetype="dashed")+
+    stat_cor(method="pearson")+
+    scale_y_continuous(
+        "# hap-selective peaks",
+        #trans="log10",
+    )+
+    my_grid()+
+    theme(
+        #legend.position = "top",
+        aspect.ratio=1,
+    )
+my_ggsave("Figures/multiome-n-hap-sel-vs-coverage.pdf", height=3, width=3) #, width=6)
+
+
+
+z=test_x_skew %>%
+    #filter(coverage < 65 ) %>%
+    #filter(x_skew < 30) %>%
+    ggplot(aes(x=x_skew, y=n_hap_selective))+
+    geom_point()+
+    geom_smooth(method="lm", se=F, color="darkred", linetype="dashed")+
+    stat_cor(method="pearson")+
+    scale_x_continuous(
+        "Average Xi skew in FIRE actuation (%)",
+        #trans="log10"
+    )+
+    scale_y_continuous(
+        "# hap-selective peaks",
+        #trans="log10",
+    )+
+    #scale_color_distiller(
+     #   "Coverage",
+        #palette = "Spectral",
+        #limits=c(0, 100),
+    #)+
+    facet_row(~has_snv, scales="free") + 
+    #annotation_logticks(side="bl")+
+    my_grid()+
+    theme(
+        #legend.position = "top",
+        aspect.ratio=1,
+    )
+my_ggsave("Figures/multiome-n-hap-sel-vs-x-skew.pdf", height=3, width=5) #, width=6)
+zz=z + xlim(10,20) 
+my_ggsave("Figures/multiome-n-hap-sel-vs-x-skew-minus-top.pdf", height=3, width=5) #, width=6)
+
+
+fit=lm(n_hap_selective ~ x_skew+coverage, data=test_x_skew %>% filter(has_snv=="n_hap_selective_no_snv"))
+summary(fit)
+af <- anova(fit)
+afss <- af$"Sum Sq"
+cbind(af,PctExp=afss/sum(afss)*100)
+```
+
+
+### show the direction of the skew for shared peaks
+```{r}
+all_samples_at_hap_sel = bed_merge(
+        hap_multiome %>% filter(!has_snv)
+    ) %>%
+    bed_map(
+        all_hap_multiome, 
+        sample = sample,
+        diff = diff,
+        fire_coverage_H1 = fire_coverage_H1,
+        fire_coverage_H2 = fire_coverage_H2,
+    )
+
+diff_between_samples_at_hap_sel = all_samples_at_hap_sel %>%
+    group_by(
+        chrom,start,end
+    ) %>%
+    summarise(
+        diffs = list(diff),
+        frac_of_acc_fibers = list(
+            (fire_coverage_H1 - fire_coverage_H2) / (fire_coverage_H2 + fire_coverage_H1)
+        ),
+        n_paternal = sum(diff > 0),
+        n_maternal = sum(diff < 0),
+        diff = median(diff),
+        n = length(unique(sample)),
+        n_raw = n(),
+    ) %>%
+    filter(
+        n > 4
+    ) %>%
+    filter(n==n_raw) %>%
+    mutate(
+        parental_diff = (n_paternal - n_maternal) / (n_paternal + n_maternal),
+        color = case_when(
+            parental_diff == 0 ~ "Equal number of samples with paternal and maternal skew",
+            parental_diff > 0 ~ "More samples with paternal skew",
+            TRUE ~ "More samples with maternal skew"
+        ),
+        is_my_imprinted = case_when(
+            parental_diff == 1 | parental_diff == -1 ~ T,
+            TRUE ~ F,
+        ),
+        my_imprinted = case_when(
+            is_my_imprinted ~ "Imprinted",
+            TRUE ~ "Not imprinted"
+        ),
+    )
+diff_between_samples_at_hap_sel %>% data.table
+
+
+
+diff_between_samples_at_hap_sel %>%
+    ggplot(aes(x=parental_diff, fill=color))+
+    geom_histogram(center=0, binwidth=0.05)+
+    #geom_step(stat="ecdf")+
+    my_grid()+
+    scale_fill_manual(
+        "",
+        values=c("darkgrey",  "darkred", "darkblue"),
+    ) +
+    scale_x_continuous(
+        "% of samples with parental skew\n(paternal - maternal) / (paternal + maternal)",
+        labels=percent
+    )+
+    guides(fill=guide_legend(nrow=3))+
+    theme(
+        legend.position = "top",
+        # set the number of legend rows
+    ) 
+my_ggsave("Figures/multiome-multi-sample-hap-sel-histogram.pdf", height=3, width=3)
+```
+
+
+```{r}
+diff_between_samples_at_hap_sel %>%
+    unnest(diffs)
+
+
+# plot the delta of imprinted vs not sites
+z=diff_between_samples_at_hap_sel %>%
+    unnest(frac_of_acc_fibers) %>%
+    ggplot(aes(x=frac_of_acc_fibers, fill=my_imprinted))+
+    geom_histogram(center=0, binwidth=0.05)+
+    #geom_step(stat="ecdf")+
+    my_grid()+
+    scale_fill_manual(
+        "",
+        values=c("darkred", "darkblue"),
+    ) +
+    scale_x_continuous(
+        "% of all accessible fibers that are paternal (+) or maternal (-)\nat fibroblast hap-selective FIRE peaks",
+        labels=percent,
+        limits=c(-1, 1)
+    )+
+    guides(fill=guide_legend(nrow=3))+
+    theme(
+        legend.position = "top",
+        # set the number of legend rows
+    )
+my_ggsave("Figures/multiome-multi-sample-hap-sel-histogram-imprinted.pdf", height=3, width=3)
+```
+
+# plot the imprinted ones along the genome
+```{r}
+pdf("tmp.pdf", height=8, width=8)
+pp = getDefaultPlotParams(plot.type=2)
+pp$ideogramheight = 2 * pp$ideogramheight 
+kp <- plotKaryotype(genome = "hg38", chromosomes="autosomal", plot.type=2, plot.params=pp)
+tdf = diff_between_samples_at_hap_sel %>% filter(is_my_imprinted) %>% select(chrom, start, end) %>% data.table
+nrow(tdf)
+kpPlotCoverage(kp, 
+    data = tdf,
+    col="darkred",
+    border="darkred",
+)
+#kpAxis(kp, data.panel=1, cex=.5, ymin=0, ymax=kp$latest.plot$computed.values$max.coverage)
+
+tdf = hap_multiome %>% filter(is_imprinted) %>% select(chrom, start, end) 
+nrow(tdf)
+kpPlotCoverage(kp, 
+    data = tdf,
+    col="darkblue",
+    border="darkblue",
+    data.panel = 2,
+)
+#kpAxis(kp, data.panel=2, cex=.5, ymin=0, ymax=kp$latest.plot$computed.values$max.coverage)
+dev.off()
+
+system("cp tmp.pdf Figures/multiome-imprinted-hap-sel-ideogram.pdf")
+
+dev.off()
+dev.off()
+dev.off()
+```
+
+# make some tables
+```{r}
+hap_multiome = hap_multiome %>%
+    bed_map(
+        diff_between_samples_at_hap_sel %>% filter(is_my_imprinted),
+        is_my_imprinted = n() > 0
+    ) %>%
+    replace_na(
+        list(
+            is_my_imprinted = FALSE
+        )
+    ) 
+table(hap_multiome$is_my_imprinted)
+table(hap_multiome$is_imprinted)
+
+#
+hap_multiome_not_imprinted_no_snv = hap_multiome %>%
+    filter(!is_imprinted) %>%
+    filter(!is_my_imprinted) %>%
+    filter(!has_snv)     
+hap_multiome_not_imprinted_no_snv %>%
+    rename(
+        `#chrom` = chrom
+    ) %>%
+    fwrite(
+        "Tables/multiome-hap-sel-not-imprinted-no-snvs.bed", 
+        sep="\t", col.names=TRUE, quote=FALSE
+    )
+
+#
+hap_multiome_not_imprinted_snv = hap_multiome %>%
+    filter(!is_imprinted) %>%
+    filter(!is_my_imprinted) %>%
+    filter(has_snv) 
+hap_multiome_not_imprinted_snv %>%
+    rename(
+        `#chrom` = chrom
+    ) %>%
+    fwrite(
+        "Tables/multiome-hap-sel-not-imprinted-snvs.bed", 
+        sep="\t", col.names=TRUE, quote=FALSE
+    )
+
+#
 
 ```

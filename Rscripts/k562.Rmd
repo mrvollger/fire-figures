@@ -181,7 +181,162 @@ z = k562 %>%
     )
         
 my_ggsave("Figures/k562-FIRE-vs-DNase-by-size.pdf", height=2, width=6)
+
 ```
+
+
+# regression by size
+```{r}
+box_regions = k562 %>%
+ filter(dnase_max > 0) %>%
+    filter(is_dnase_peak) %>%
+    mutate(
+        dnase_cut = cut(
+            dnase_max, 
+            breaks=c(0, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10, 25, 50),
+        ),
+        fire_cut = cut(100*fire_coverage/coverage, breaks=seq(0, 100, 10)),
+        fire_frac=fire_coverage/coverage,
+    ) %>%
+    group_by(dnase_cut, size_group)
+
+fake_zero_zero = box_regions %>%
+    group_by(size_group_label) %>%
+    sample_n(1) %>%
+    mutate(
+        dnase_max = 0,
+        fire_coverage = 0,
+    )
+
+box_regions = bind_rows(
+    list(
+        #fake_zero_zero, 
+        box_regions
+    )
+)
+
+fit <- lm(dnase_max ~ fire_frac * size_group_label, data = box_regions)
+summary(fit)
+# predictions for 50% fire coverage
+pred = data.frame(
+    fire_frac = sort(rep(c(0.25, 0.5, 0.75), 3)),
+    size_group_label = rep(unique(box_regions$size_group_label),3)
+)
+pred$dnase_max=predict(fit, newdata=pred)
+pred
+
+formula <- y ~ x 
+z = box_regions %>% 
+    ggplot(aes(x=fire_frac, y=dnase_max, color=size_group_label)) +
+    geom_smooth(method="lm", 
+        se=F,
+        formula=formula,
+    ) +
+    #stat_cor(label.y=c(8,9,10),label.x=0.5,)+ 
+    stat_regline_equation(
+        aes(label =  paste(..eq.label..)),
+        label.y=8.5+1.1*c(0,.5,1),
+        size=3,
+        formula=formula,
+    ) +
+    geom_text_repel(
+        data=pred %>% filter(fire_frac==0.5),
+        aes(label=round(dnase_max,2)),
+        color="black",
+        size=2,
+        nudge_y=0.75,
+        #direction="y",
+        arrow=arrow(type="closed", length=unit(0.005, "npc")),
+        min.segment.length=0,
+    ) +
+    my_grid() + 
+    scale_y_continuous(
+        "K562 DNase peak signal",
+        labels=comma,
+    #    trans="log10",
+    )+
+    scale_x_continuous(
+        "K562 FIRE % actuation",
+        labels=percent,
+        #limits=c(0,1),
+    ) + 
+    scale_color_manual(
+        "",
+        values = c("darkorange", "darkred", "darkblue"),
+    ) +
+    #coord_flip() +
+    theme(
+        legend.position="top",
+        aspect.ratio=1,
+    )
+
+my_ggsave("Figures/k562-FIRE-vs-DNase-by-size-regression.pdf", height=3, width=3)
+```
+
+```{r}
+d = k562 %>% filter(is_dnase_peak) %>% mutate(fire_acc = fire_coverage/coverage)
+
+fit <- lm(dnase_max ~ psize * fire_acc, data = d)
+summary(fit)
+af <- anova(fit)
+afss <- af$"Sum Sq"
+cbind(af,PctExp=afss/sum(afss)*100)
+
+fit <- lm(dnase_max ~ psize, data = d)
+summary(fit)
+af <- anova(fit)
+afss <- af$"Sum Sq"
+cbind(af,PctExp=afss/sum(afss)*100)
+
+```
+Call:
+lm(formula = dnase_max ~ psize * fire_acc, data = d)
+
+Residuals:
+    Min      1Q  Median      3Q     Max 
+-20.165  -0.712  -0.150   0.390  74.304 
+
+Coefficients:
+                 Estimate Std. Error t value Pr(>|t|)    
+(Intercept)    -0.2281745  0.0417618  -5.464 4.67e-08 ***
+psize          -0.0020502  0.0002084  -9.839  < 2e-16 ***
+fire_acc       -0.3759709  0.0723159  -5.199 2.01e-07 ***
+psize:fire_acc  0.0305333  0.0003130  97.566  < 2e-16 ***
+---
+Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+
+Residual standard error: 1.689 on 99108 degrees of freedom
+Multiple R-squared:  0.608,     Adjusted R-squared:  0.608 
+F-statistic: 5.124e+04 on 3 and 99108 DF,  p-value: < 2.2e-16
+
+                  Df    Sum Sq      Mean Sq   F value Pr(>F)    PctExp
+psize              1 257148.04 2.571480e+05 90171.931      0 35.665861
+fire_acc           1 154066.57 1.540666e+05 54025.225      0 21.368691
+psize:fire_acc     1  27145.98 2.714598e+04  9519.053      0  3.765088
+Residuals      99108 282631.49 2.851753e+00        NA     NA 39.200360
+
+Call:
+lm(formula = dnase_max ~ psize, data = d)
+
+Residuals:
+    Min      1Q  Median      3Q     Max 
+-29.120  -1.042  -0.334   0.565  76.783 
+
+Coefficients:
+              Estimate Std. Error t value Pr(>|t|)    
+(Intercept) -2.8929053  0.0222170  -130.2   <2e-16 ***
+psize        0.0248247  0.0001059   234.4   <2e-16 ***
+---
+Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+
+Residual standard error: 2.163 on 99110 degrees of freedom
+Multiple R-squared:  0.3567,    Adjusted R-squared:  0.3567 
+F-statistic: 5.495e+04 on 1 and 99110 DF,  p-value: < 2.2e-16
+
+             Df Sum Sq      Mean Sq  F value Pr(>F)   PctExp
+psize         1 257148 2.571480e+05 54945.07      0 35.66586
+Residuals 99110 463844 4.680093e+00       NA     NA 64.33414
+
 
 ```{r}
 ```
