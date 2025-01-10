@@ -1,0 +1,332 @@
+```{r}
+source("Rscripts/Fire-peak-df.R")
+```
+
+```{r}
+genes = fread("/mmfs1/gscratch/stergachislab/mvollger/projects/GM12878_aCRE_2022-08-16/XCI/isoseq/all_gene_counts_by_hap.tsv")
+isoforms = fread("/mmfs1/gscratch/stergachislab/mvollger/projects/GM12878_aCRE_2022-08-16/XCI/isoseq/all_iso_counts_by_hap.tsv")
+```
+
+
+```{r}
+window_size = 2000
+genes$start = genes$tss - window_size/2
+genes$end = genes$tss + window_size/2
+isoforms$start = isoforms$tss - 50
+isoforms$end = isoforms$tss + 50
+
+
+acc_vs_rna = genes %>%
+    as_tibble %>%
+    mutate(
+        isoseq_count = H1+H2+UNK,
+    ) %>% 
+    bed_map(
+        fire_df,
+        max_fire_frac = max(fire_coverage/coverage),
+        max_dnase = log(max(dnase_max)+1),
+        max_atac = log(max(atac_max)+1),
+        fire_score = max(score),
+        n_peaks = n(),
+    ) %>%
+    filter(
+        #!is.na(max_fire_frac) & !is.na(max_dnase) & !is.na(max_atac)
+    ) %>%
+    replace_na(
+        list(
+            max_fire_frac = 0,
+            max_dnase = 1,
+            max_atac = 1
+        )
+    ) %>%
+    filter(
+        #max_fire_frac > 0,
+        #max_dnase > 0,
+        #max_atac > 0
+    ) %>%
+    #filter(isoseq_count > 10) %>%
+    #filter(isoseq_count > 100) %>%
+    mutate(
+        tpm = isoseq_count/sum(isoseq_count) * 1e6,
+        value = log(tpm),
+    ) %>%
+    filter(
+        !is.infinite(value)
+    )
+
+max(acc_vs_rna$value)
+table(acc_vs_rna$n_peaks)
+```
+
+
+```{r}
+fit = lm(
+    value ~  (max_fire_frac + max_dnase + max_atac),
+    data=acc_vs_rna
+)
+summary(fit)
+
+```
+
+
+```{r}
+fit = lm(value ~ (max_fire_frac), data=acc_vs_rna)
+summary(fit)
+
+fit = lm(tpm ~ (max_fire_frac), data=acc_vs_rna)
+summary(fit)
+
+fit = lm(value ~ (max_dnase), data=acc_vs_rna)
+summary(fit)
+
+
+fit = lm(value ~ (max_atac), data=acc_vs_rna)
+summary(fit)
+```
+
+
+# value histogram
+```{r}
+acc_vs_rna %>%
+    ggplot(aes(value)) +
+    geom_histogram(bins=100) +
+    scale_x_continuous(
+        label=comma,
+        trans="log10"
+    ) +
+    annotation_logticks(sides="b") +
+    my_grid()
+my_ggsave(
+    "Figures/predict-transcripts-from-fire-value-histogram.pdf",
+    width=3, height=2
+)
+```
+
+# plot fire vs value with genom hex
+```{r}
+# pivot longer based of max fire atac and dnase
+acc_vs_rna %>% 
+    pivot_longer(
+        c(max_fire_frac, max_dnase, max_atac),
+        names_to="feature", values_to="acc_value"
+    ) %>%
+    ggplot(aes(acc_value, value)) +
+    geom_hex(bins=50) +
+    stat_cor(method="pearson") +
+    geom_smooth(method="lm", se=FALSE) +
+    scale_x_continuous(
+    ) +
+    facet_row(~feature, scales="free_x") +
+    scale_y_continuous(
+        label=comma
+    ) +
+    my_grid()
+my_ggsave("Figures/predict-transcripts-from-fire-value-vs-fire.pdf", width=5, height=3)
+```
+
+```{r}
+min(acc_vs_rna$max_fire_frac)
+```
+
+
+```{r}
+z = fire_df %>%
+    filter(p_adjust <= 0.05) %>%
+    filter(chrom != "chrX") %>%
+    mutate(
+        size_group = case_when(
+            psize < 200 ~ "< 200",
+            TRUE ~ ">= 200"
+        )
+    ) %>%
+    group_by(is_ctcf_peak, size_group) %>%
+    mutate(
+        n_atac = sum(is_atac_peak),
+        n_not_atac = sum(!is_atac_peak),
+    ) %>%
+    ungroup() %>%
+    mutate(
+        is_ctcf_peak = case_when(
+            is_ctcf_peak ~ paste0("CTCF peak\n", n_not_atac, "/", n_atac),
+            TRUE ~ paste0("Not CTCF peak\n", n_not_atac, "/", n_atac)
+        )
+    ) 
+
+z %>%
+    ggplot(aes(
+        x=fire_coverage/coverage,
+        y=atac_max,
+        fill=is_atac_peak
+    )) +
+    geom_point(
+        size=0.5,
+        alpha=0.5,
+        shape=21,
+        color="grey"
+    ) +
+    #geom_xsidehistogram(bins=100)+
+    #geom_ysidehistogram(bins=100)+
+    geom_smooth(
+        aes(color=is_atac_peak),
+        method="lm", se=FALSE,
+        linewidth=0.5,
+        alpha=0.5,
+    ) +
+    stat_cor(
+        method="pearson",
+        size=2.5    
+    ) +
+    scale_y_continuous(
+        "ATAC signal",
+        #trans="log10",
+    )+
+    facet_wrap(size_group~is_ctcf_peak, nrow=2, scales="free_y") + 
+    scale_x_continuous(
+        "% FIRE",
+        label=percent,
+    )+
+    scale_color_manual(
+        "ATAC peak",
+        values=c("darkred", "black")
+    ) +
+    scale_fill_manual(
+        "ATAC peak",
+        values=c("darkred", "black")
+    ) +
+    my_grid() +
+    theme(
+        #legend.position="top",
+        aspect.ratio=1
+    ) 
+fire_df %>%
+    mutate(
+        hap_selective = case_when(
+            p_adjust <= 0.05 & chrom != "chrX" ~ "Hap-selective",
+            TRUE ~ "Not hap-selective"
+        )
+    ) %>%
+    group_by(
+        hap_selective
+    ) %>%
+    dplyr::summarize(
+        is_atac_peak = sum(is_atac_peak),
+        n = n(),
+        fraction_is_atac_peak = is_atac_peak/n
+    ) %>%
+    fwrite("Figures/hap-sel-with-atac-proportion.txt")
+fread("Figures/hap-sel-with-atac-proportion.txt")    
+
+z %>%
+    filter(!is_atac_peak & psize < 200 ) %>%
+    filter(grepl("^CTCF peak", is_ctcf_peak)) %>%
+    mutate(
+        fire_per = 100*(fire_coverage/coverage)
+    ) %>%
+    select(
+        chrom, start, end, psize, fire_per, atac_max, is_ctcf_peak, n_snvs
+    ) %>%
+    fwrite("Figures/hap-sel-no-atac-small.txt")
+fread("Figures/hap-sel-no-atac-small.txt")
+
+my_ggsave("Figures/hap-sel-atac-vs-fire.pdf", width=4, height=4)
+```
+
+
+# histogram of ctcf psize 
+```{r}
+fire_df %>%
+    filter(is_ctcf_peak) %>%
+    mutate(
+        psize = case_when(
+            psize > 750 ~ 750,
+            psize < 100 ~ 100,
+            TRUE ~ psize
+        )
+    ) %>%
+    ggplot(aes(psize)) +
+    geom_histogram(bins=100) +
+    scale_x_continuous(
+        "CTCF peak size",
+        trans="log10",
+        label=comma
+    ) +
+    annotation_logticks(sides="b") +
+    my_grid()
+my_ggsave("Figures/ctcf-peak-size-histogram.pdf", width=3, height=2)
+```
+
+```{r}
+c1=my_read_bed("data/CTCF_peak_ENCFF356LIU.bed.gz")
+c2=my_read_bed("data/CTCF_peak_ENCFF960ZGP.bed.gz")
+ctcfs = bind_rows(
+    list(
+        c1=c1,
+        c2=c2
+    ),
+    .id="source"
+)
+ctcfs$max_ctcf = ctcfs$V7
+
+ctcf_peaks_df$source = "ctcf"
+
+ctcf_pred = ctcf_peaks_df %>%
+    bed_map(
+        dnase_peaks,
+        dnase_max = max(V7),
+    ) %>%
+    bed_map(
+        atac_peaks,
+        atac_max = max(V7),
+    ) %>%
+    bed_map(
+        fire_df,
+        fire_max = max(fire_coverage/coverage),
+    ) 
+
+fit = lm(max_ctcf ~ dnase_max + atac_max + fire_max, data=ctcf_pred)
+summary(fit)
+
+fit = lm(max_ctcf ~ atac_max, data=ctcf_pred)
+summary(fit)
+
+fit = lm(max_ctcf ~ fire_max, data=ctcf_pred)
+summary(fit)
+```
+
+# plot ctcf chip seq singal vs max_fire and max_atac
+```{r}
+z=ctcf_pred %>%
+    pivot_longer(
+        c(fire_max, atac_max, dnase_max),
+        names_to="feature", values_to="signal"
+    ) %>%
+    #filter(feature != "dnase_max") %>%
+    group_by(
+        feature, source
+    ) %>%
+    mutate(
+        not_na = sum(!is.na(signal)),
+        feature = paste0(feature, "   n = ", not_na, " of ", n())
+    ) %>%
+    ggplot(aes(signal, max_ctcf)) +
+    geom_hex(bins=50) + scale_fill_distiller("", palette = "Spectral", trans="log10") +
+    geom_smooth(method="lm", se=FALSE) +
+    stat_cor(
+        aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")), 
+        method="spearman", size=2
+    ) +
+    scale_x_continuous(
+        "Accessibility signal",
+        #label=percent
+    ) +
+    scale_y_continuous(
+        "CTCF signal",
+        label=comma
+    ) +
+    facet_wrap(source~feature, scales="free", nrow=1) +
+    my_grid() +
+    theme(
+        aspect.ratio=1
+    )
+my_ggsave("Figures/ctcf-signal-vs-accessibility-signal.pdf", width=5, height=3)
+```

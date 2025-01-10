@@ -9,12 +9,31 @@ library(pROC)
 pos = fread("msp-vs-fire-roc-data/pos.msp.bed.gz")
 neg = fread("msp-vs-fire-roc-data/neg.msp.bed.gz")
 
-msp_fire_data = bind_rows(list(`1`=pos,`0`=neg), .id="label") %>%
+
+
+all_msp_fire_data = bind_rows(list(`1`=pos,`0`=neg), .id="label") %>%
     mutate(
         msp_len = V3 - V2,
         FDR = V10,
         fire_pred = 1 - FDR,
-    ) %>% 
+        fire = case_when(
+            FDR <= 0.05 ~ "FIRE",
+            TRUE ~ "Linker"
+        ),
+        dnase = case_when(
+            label == 1 ~ "DNase peak",
+            TRUE ~ "Not a DNase peak"
+        )
+    ) 
+all_msp_fire_data %>% 
+    group_by(fire) %>%
+    summarise(
+        z=n(),
+        mean_len=mean(msp_len),
+        median_len=median(msp_len),
+    )
+
+msp_fire_data = all_msp_fire_data %>%
     # cannot be called fire
     filter(msp_len > 85) %>%
     # filter out nucs 
@@ -178,4 +197,38 @@ colnames(fiber_counts) = c("sample", "fiber_count")
 fire_counts %>%
     merge(fiber_counts)
 
+```
+
+
+# fire vs linker lenght
+```{r}
+t = copy(all_msp_fire_data)
+t$fire = "All MSPs"
+all_msp_fire_data 
+bind_rows(list(
+    t, 
+    all_msp_fire_data
+)) %>%
+    ggplot(aes(x=msp_len, color=fire)) +
+    geom_density(alpha=0.75) +
+    my_grid() +
+    scale_x_continuous("MSP length", 
+        label = scales::comma,
+        trans = "log10",
+    ) +
+    annotation_logticks(sides="b") +
+    scale_color_manual(
+        "",
+        values=c(
+            FIRE="darkred", 
+            Linker="purple", 
+            `All MSPs`="darkgrey"
+        ),
+        #labels=c("FIRE", "Linker", "All MSPs")
+    ) +
+    facet_col(~dnase) +
+    theme(
+        legend.position="top"
+    )
+my_ggsave("Figures/msp-vs-fire-length.pdf", height=3, width=3)
 ```

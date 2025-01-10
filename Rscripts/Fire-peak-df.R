@@ -36,12 +36,12 @@ if(F){
     
     # data 
     dnase_peaks=my_read_bed("data/ENCFF762CRQ_DNase_peaks.bed.gz")
-    dnase=my_read_bed("../phased-fdr-and-peaks/data/bedgraph_annotations/ENCFF960FMM_dnase_signal.bed")
+    dnase=my_read_bed("data/bedgraph_annotations/ENCFF960FMM_dnase_signal.bed.gz")
     colnames(dnase)[4] = "dnase_sig"
     
     #atac_peaks = my_read_bed("data/10X_GM12878_peaks_max_cov.bed.gz")
     atac_peaks = my_read_bed("data/scATAC_GM12878_peaks_MACS2.bed.gz")
-    atac = my_read_bed("../phased-fdr-and-peaks/data/ATAC/10X_GM12878_aggr_scATAC.bg.gz")
+    atac = my_read_bed("data/10X_GM12878_aggr_scATAC.bg.gz")
     colnames(atac)[4] = "atac_sig"
 
     # 5mc 
@@ -56,7 +56,10 @@ if(F){
     # CTCF 
     c1=my_read_bed("data/CTCF_peak_ENCFF356LIU.bed.gz")
     c2=my_read_bed("data/CTCF_peak_ENCFF960ZGP.bed.gz")
-    ctcf_peaks_df = bind_rows(c1,c2) %>% bed_merge()
+    ctcf_peaks_df = bind_rows(c1,c2) %>% bed_merge(
+        max_ctcf = max(V7)
+    )
+    ctcf_peaks_df
 
     ctcf_motifs = my_read_bed("data/ctcf-motifs.bed.gz")
 
@@ -67,6 +70,14 @@ if(F){
     df$acc_percent = df$fire_coverage/df$peak_cov
     colnames(df)[1:5]=c("chrom", "start","end","ostart","oend")
     df$ID = paste0(df$chrom, "_", df$start, "_", df$end)
+
+    vcf="data/GM12878.vcf.gz"
+    gm12878_vcf_df = fread(cmd=glue("bcftools view -f 'PASS' -i 'GT=\"HET\"' {vcf} | grep -v ^##"))  %>% 
+    mutate(start = POS-1) %>%
+    rename(
+        chrom="#CHROM",
+        end=POS
+    )
 
     df = df %>%
         filter(acc_percent >= MIN_FRAC_ACC) %>%
@@ -98,6 +109,7 @@ if(F){
         ) %>%
         bed_map(ctcf_peaks_df, 
             is_ctcf_peak = n()>0,
+            ctcf_max = max(max_ctcf)[[1]],
         ) %>%
         bed_map(
             ctcf_motifs,
@@ -134,6 +146,11 @@ if(F){
             SDs_all,
             SD_max_frac_match = max(fracMatch),
         ) %>% 
+        bed_map(
+            gm12878_vcf_df,
+            is_het = n()>0,
+            n_snvs = n(),
+        ) %>%
         bed_map(
             cage_tss_with_direction_df,
             is_cage_tss = n()>0,
