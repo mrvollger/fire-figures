@@ -70,8 +70,107 @@ gwas.het.vcf = fread(cmd='bcftools view Revision-1/GWAS/echtvar/results/gm12878.
             INFO,
              "FREQ=1000Genomes:[0-9]+.[0-9]+"
         ) %>% str_replace("FREQ=1000Genomes:", "") %>% as.numeric
-    ) 
+    ) %>%
+    replace_na(list(MAF=0)) 
 gwas.het.vcf
+
+
+het.vcf.all = fread(cmd='bcftools view Revision-1/GWAS/echtvar/results/gm12878.anno.vcf.gz | grep -v "^##"') %>%
+    mutate(
+        chrom=`#CHROM`,
+        start = POS-1,
+        end = POS
+    ) %>% 
+    mutate(
+        rsID=str_extract(INFO, "rsID=[0-9]+") %>% str_replace("rsID=", "") %>% as.numeric,
+        MAF=str_extract(
+            INFO,
+             "FREQ=1000Genomes:[0-9]+.[0-9]+"
+        ) %>% str_replace("FREQ=1000Genomes:", "") %>% as.numeric
+    ) %>%
+    replace_na(list(MAF=0))
+het.vcf.all
+table(round(100*het.vcf.all$MAF))
+```
+
+# plot the MAF of variants within HAP selective peaks
+```{r}
+z= fire_df %>%
+    mutate(
+        hap_selective = case_when(
+            p_adjust <= 0.05 & chrom %in% FAI_NO_SEX$name ~ "hap-selective",
+            TRUE ~ "not-hap-selective"
+        )
+    ) %>%
+    bed_map(
+        het.vcf.all,
+        MAF = min(MAF),
+    ) %>%
+    filter(!is.na(MAF)) %>%
+    select(chrom,start,end,MAF, hap_selective)
+table(z$hap_selective)
+
+z2=bed_closest(z, gwas.het.vcf,
+        suffix = c("", ".y") 
+    ) %>%
+    mutate(
+        .dist = abs(.dist)
+    ) %>%
+    mutate(
+        overlap_gwas = .dist <= 1,
+        close_gwas = .dist <= 40e3,
+    ) %>%
+    filter(overlap_gwas|close_gwas) %>%
+    mutate(
+        case = case_when(
+            overlap_gwas ~ "overlaps GWAS",
+            close_gwas ~ "close to GWAS",
+            TRUE ~ "far from GWAS"
+        )
+    )
+z2
+table(z$hap_selective)
+table(z2$.dist[z2$.dist < 0])
+
+z2 %>%
+    ggplot(
+        aes(x=MAF, color = hap_selective)
+    ) +
+    geom_step(
+        aes(
+            #y=after_stat(density),
+            #linetype=case
+        ),
+        stat="bin", bins=50,
+        alpha=0.75
+    ) +
+    facet_col(~hap_selective+case, scales="free_y") +
+    scale_x_continuous("1,000 genomes minor allele frequency of variants within FIRE peaks") +
+    scale_y_continuous(
+        "count",
+        limits=c(0,NA),
+        #label=percent,
+    ) +
+    scale_color_manual("", values=c("hap-selective"="darkred", "not-hap-selective"="darkblue")) +
+    my_grid() +
+    theme(
+        legend.position = "top",
+    )
+
+my_ggsave("Figures/MAF-within-hap-selective-peaks.pdf", height=6, width=3)
+```
+
+# MAF of just gwas.het
+```{r}
+gwas.het.vcf %>%
+    ggplot(
+        aes(x=MAF)
+    ) +
+    geom_histogram(bins=50) +
+    scale_x_continuous("1,000 genomes minor allele frequency of het. GWAS variants in GM12878") +
+    scale_y_continuous("count") +
+    my_grid()
+my_ggsave("Figures/MAF-of-all-het-GWAS-variants.pdf", height=3, width=3)
 ```
 
 # get haplotype selective peaks with shuffles that have the genetic variants
@@ -249,6 +348,8 @@ table(closest$rank)
 length(unique(hap_peaks_with_null$group))
 ```
 
+
+
 # for every gwas find the closest haplotype selective peak
 ```{r}
 all.gwas.df = bind_rows(list(
@@ -287,6 +388,8 @@ my_colors = c(
     "random sample of\nFIRE peaks" = "darkblue",
     "random intervals" = alpha("darkgray", 0.25))
 gwas.df$real = factor(gwas.df$real, levels=names(my_colors))
+
+
 
 unique(gwas.df$real)
 ```

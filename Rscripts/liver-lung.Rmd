@@ -11,7 +11,7 @@ vcf_lung = fread(cmd=glue("bcftools view -f 'PASS' -i 'GT=\"HET\"' {vcff} | grep
         end=POS
     )
 
-```{r}
+```
 
 ```{r}
 lung_peaks = my_read_bed("results/ST001-lung-hiphase/hap1-vs-hap2/FIRE.hap.differences.bed") 
@@ -92,6 +92,7 @@ asdf = tissue_peaks_compare_df %>%
     #filter(!(is_het & is_imprinted)) %>%
     mutate(
         is_het = case_when(
+            is_imprinted ~ "Imprinted",
             is_het ~ "Overlaps heterozygous variant",
             TRUE ~ "Homozygous",
         ),
@@ -115,7 +116,7 @@ asdf = tissue_peaks_compare_df %>%
     stat_cor(size=2) + 
     facet_grid(~is_het) +
     scale_y_continuous(
-        "Percent accessibility difference in Lung haplotype-selective peaks",
+        "Percent accessibility difference in\nLung haplotype-selective peaks",
         limits=c(-1,1), labels=percent) +
     scale_x_continuous(
         "Percent accessibility difference in Liver",
@@ -128,7 +129,7 @@ asdf = tissue_peaks_compare_df %>%
     coord_fixed() +
     theme_minimal_grid(font_size=6) +
     theme(legend.position="top")
-my_ggsave("Figures/lung-liver-hap-peaks.pdf", height=4, width=4)
+my_ggsave("Figures/lung-liver-hap-peaks.pdf", height=2, width=4)
 ```
 
 same plot as above but passage A vs B for tumor

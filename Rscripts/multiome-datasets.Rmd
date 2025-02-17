@@ -2,7 +2,6 @@
 source("Rscripts/Fire-peak-df.R")
 ```
 
-
 ```{r}
 metadata=fread("/mmfs1/gscratch/stergachislab/mvollger/projects/FIREv2.0/Revision-1/multiome-fibroblasts/chrY.calls.tbl", header=FALSE) %>%
     mutate(
@@ -46,6 +45,36 @@ z=metadata %>%
 my_ggsave("Figures/multiome-sex.pdf", height=3, width=3)
 ```
 
+#cpg
+```{r}
+#bed_merge(hap_multiome) %>% fwrite("temp/hap-multiome.bed", sep="\t", col.names=FALSE)
+# read cpg 
+multiome_cpg = fread("Revision-1/multiome-fibroblasts/all.cpg.tbl.gz") %>%
+    select(V1, V2, V3, V5, V9, V10)
+colnames(multiome_cpg) = c("chrom", "start", "end", "hap", "frac_5mc", "sample")
+h1 = multiome_cpg %>% filter(hap=="hap1") %>% 
+    select(chrom, start, end, frac_5mc, sample) %>%
+    rename(
+        frac_5mc_hap1 = frac_5mc
+    )
+h2 = multiome_cpg %>% filter(hap=="hap2") %>% 
+    select(chrom, start, end, frac_5mc, sample) %>%
+    rename(
+        frac_5mc_hap2 = frac_5mc
+    )
+multiome_cpg = h1 %>% 
+    merge(h2, by=c("chrom", "start", "end", "sample")) %>%
+    # remove NA rows
+    filter(!is.na(frac_5mc_hap1) & !is.na(frac_5mc_hap2)) %>%
+    mutate(
+        hap_5mC_diff = abs(frac_5mc_hap1 - frac_5mc_hap2),
+        cpg_diff = frac_5mc_hap1 - frac_5mc_hap2
+    ) %>%
+    data.table
+multiome_cpg
+```
+
+# hap selective peaks
 ```{r}
 all_hap_multiome = my_read_bed("../FIREv2.0/Revision-1/multiome-fibroblasts/hap-selective/all.tbl.gz") %>%
     merge(metadata, by="sample") %>%
@@ -53,6 +82,13 @@ all_hap_multiome = my_read_bed("../FIREv2.0/Revision-1/multiome-fibroblasts/hap-
     bed_map(
         imprinted,
         is_imprinted = n() > 0
+    ) %>%
+    bed_map(
+        multiome_cpg,
+        #cpg_diff = cpg_diff[which.max(abs(cpg_diff))]
+        #cpg_diff = mean(cpg_diff)
+        cpg_diff = median(cpg_diff),
+        n_cpg = n(),
     ) %>%
     replace_na(
         list(
@@ -81,12 +117,34 @@ hap_multiome = all_hap_multiome %>%
 
 md2 = fread("/mmfs1/gscratch/stergachislab/mvollger/projects/FIREv2.0/Revision-1/multiome-fibroblasts/fiber-seq-multiomes.tsv")
 md2
-all_hap_multiome %>%
+used = all_hap_multiome %>%
     select(sample, sex) %>%
     merge(md2, by.x="sample", by.y="fiberseq_ps") %>%
     unique %>%
-    select(-id_fiberseq_ps)
+    select(-id_fiberseq_ps) 
+
+used%>%
+    fwrite("Tables/multiome-sample-metadata.tsv", sep="\t", col.names=TRUE, quote=FALSE)
+
+used
+
+z=fread("Revision-1/multiome-fibroblasts/Multiome_Sample_names_and_bam_locations_11.14.24.tsv")
+colnames(z)
+
+z %>%
+    rename(
+        transcript_ps = sample,
+    ) %>%
+    mutate(sample = fiberseq_ps) %>%
+    select(sample, sample_type, transcript_ps, cyclo_noncyclo ) %>%
+    merge(used, by="sample") 
+
 ```
+
+
+
+
+
 
 ```{r}
 z=hap_multiome %>%
@@ -448,6 +506,8 @@ all_samples_at_hap_sel = bed_merge(
         all_hap_multiome, 
         sample = sample,
         diff = diff,
+        cpg_diff = cpg_diff,
+        n_cpg = n_cpg,
         fire_coverage_H1 = fire_coverage_H1,
         fire_coverage_H2 = fire_coverage_H2,
         is_imprinted = sum(is_imprinted) > 0
@@ -460,12 +520,16 @@ diff_between_samples_at_hap_sel = all_samples_at_hap_sel %>%
     ) %>%
     summarise(
         diffs = list(diff),
+        cpgs=list(cpg_diff),
+        n_cpgs = list(n_cpg),
         frac_of_acc_fibers = list(
             (fire_coverage_H1 - fire_coverage_H2) / (fire_coverage_H2 + fire_coverage_H1)
         ),
         n_paternal = sum(diff > 0),
         n_maternal = sum(diff < 0),
         diff = median(diff),
+        cpg_diff=median(cpg_diff, na.rm=T),
+        n_cpg = median(n_cpg, na.rm=T),
         n = length(unique(sample)),
         n_raw = n(),
         is_imprinted = sum(is_imprinted) > 0
@@ -518,9 +582,78 @@ diff_between_samples_at_hap_sel %>%
         legend.position = "top",
         # set the number of legend rows
     ) 
+
+diff_between_samples_at_hap_sel %>%
+    mutate(
+        is_consistent = abs(parental_diff) > 0.90,
+    ) %>%
+    group_by(is_consistent) %>%
+    summarise(
+        n()
+    )
+
 my_ggsave("Figures/multiome-multi-sample-hap-sel-histogram.pdf", height=3, width=3)
 ```
 
+
+
+```{r}
+diff_between_samples_at_hap_sel %>%
+    mutate(
+        is_consistent = abs(parental_diff) > 0.90,
+    ) %>%
+    filter(is_consistent) %>%
+    ggplot(
+        aes(
+            fill=is_imprinted, x=diff, y=cpg_diff,
+        )
+    ) +
+    geom_point(
+        aes(
+            #size = n,
+            size=n_cpg,
+        ),
+        alpha=0.75,
+        shape=21,
+    ) +
+    # label these two regions with text:
+    # chr15:23642499-23642719
+    # chr2:206274864-206275056
+    geom_text_repel(
+        data = . %>%
+            filter(
+                (chrom == "chr2" & abs(start - 206274864 )<1000 ) |
+                (chrom == "chr15" & abs(start - 23642499 ) <1000 )
+            ),
+        aes(
+            label = paste0(chrom, ":", comma(start), "-", comma(end)),
+        ),
+        size=1.5,
+        min.segment.length = 0,
+        point.padding = NA,
+        force_pull=0.1,
+        force=80,
+        seed=1
+    ) +
+    scale_fill_manual(
+        "Overlaps known\nimprinted sites",
+        values=c("darkred", "darkblue"),
+    ) +
+    scale_size_continuous(
+        "# of CpG sites",
+        #breaks=c(5,10),
+        range = c(1, 5),
+        limits=c(0,NA),
+        labels=comma,
+    ) +
+    xlab("Median chromatin skew") +
+    ylab("Median CpG skew") +
+    my_grid() +
+    theme(
+        #legend.position = "top",
+    )
+my_ggsave("Figures/multiome-multi-sample-consistent-chromatin-cpg-vs-accessible.pdf", height=2, width=3)
+```
 
 ```{r}
 diff_between_samples_at_hap_sel %>%
@@ -678,33 +811,6 @@ hap_multiome_2 %>%
 #
 # test for GC
 #
-```{r}
-#bed_merge(hap_multiome) %>% fwrite("temp/hap-multiome.bed", sep="\t", col.names=FALSE)
-# read cpg 
-multiome_cpg = fread("Revision-1/multiome-fibroblasts/all.cpg.tbl.gz") %>%
-    select(V1, V2, V3, V5, V9, V10)
-colnames(multiome_cpg) = c("chrom", "start", "end", "hap", "frac_5mc", "sample")
-h1 = multiome_cpg %>% filter(hap=="hap1") %>% 
-    select(chrom, start, end, frac_5mc, sample) %>%
-    rename(
-        frac_5mc_hap1 = frac_5mc
-    )
-h2 = multiome_cpg %>% filter(hap=="hap2") %>% 
-    select(chrom, start, end, frac_5mc, sample) %>%
-    rename(
-        frac_5mc_hap2 = frac_5mc
-    )
-multiome_cpg = h1 %>% 
-    merge(h2, by=c("chrom", "start", "end", "sample")) %>%
-    # remove NA rows
-    filter(!is.na(frac_5mc_hap1) & !is.na(frac_5mc_hap2)) %>%
-    mutate(
-        hap_5mC_diff = abs(frac_5mc_hap1 - frac_5mc_hap2)
-    ) %>%
-    data.table
-multiome_cpg
-```
-
 ```{r}
 
 hap_multiome_cpg = hap_multiome_2 %>%

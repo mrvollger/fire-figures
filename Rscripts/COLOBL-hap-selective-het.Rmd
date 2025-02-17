@@ -12,8 +12,77 @@ vcf_bl = fread(cmd=glue("bcftools view -f 'PASS' -i 'GT=\"HET\"' {vcf} | grep -v
     )
 
 bl_peaks = my_read_bed("results/PS00338_COLO829BL_1/hap1-vs-hap2/FIRE.hap.differences.bed")
+bl_peaks_2 = my_read_bed("results/PS00356_COLO829BL_2/hap1-vs-hap2/FIRE.hap.differences.bed")
 bl_peaks
 ```
+
+```{r}
+bl_peaks_hap = bl_peaks %>% filter( p_adjust <= 0.05 & chrom != "chrX" ) 
+bl_peaks_hap_2 = bl_peaks_2 %>% filter( p_adjust <= 0.05 & chrom != "chrX" )
+z=bed_merge(
+    bind_rows(bl_peaks_hap, bl_peaks_hap_2)
+    ) %>%
+    bed_map(
+        bl_peaks,
+        diff = diff[which.max(abs(diff))]
+    ) %>%
+    bed_map(
+        bl_peaks_2,
+        diff_2 = diff[which.max(abs(diff))]
+    )
+sum(is.na(z$diff_2))
+
+z %>%   
+    ggplot(aes(diff, diff_2)) +
+    geom_hex(bins=50) + scale_fill_distiller(palette="Spectral") +
+    geom_abline(slope=1, intercept=0, color="red") +
+    stat_cor() +
+    xlab("Actuation difference in haplotype-selective peaks (hap1-hap2)\nCOLO829 Blood replicate 1") +
+    ylab("Actuation difference in haplotype-selective peaks (hap1-hap2)\nCOLO829 Blood replicate 2") +
+    my_grid()+
+    theme(
+        aspect.ratio=1
+    )
+my_ggsave("Figures/COLO-hap-selective-replicate-diff-correlation.pdf", width=3, height=3)
+```
+
+```{r}
+m6a1 = fread(cmd = "zcat /mmfs1/gscratch/stergachislab/mvollger/projects/FIREv2.0/COLO-asm/results/PS00338_DSA/pbmm2/*.tbl.gz  | rg m6a_ratio")
+m6a2 = fread(cmd = "zcat /mmfs1/gscratch/stergachislab/mvollger/projects/FIREv2.0/COLO-asm/results/PS00356_DSA/*/*.tbl.gz  | rg m6a_ratio")
+z = bind_rows(
+    list(
+        m6a1=m6a1,
+        m6a2=m6a2
+    ),
+    .id="source"
+) 
+colnames(z) = c("source", "stat", "value", "count")
+z
+# geom step histogram of m6a ratios 
+z %>%
+    ggplot(aes(value, weight=count, color=source)) +
+    geom_step(stat="bin", bins=100) +
+    scale_x_continuous("m6A ratio") +
+    scale_y_continuous("Number of peaks") +
+    my_grid() +
+    theme(
+        aspect.ratio=1
+    )
+my_ggsave("Figures/COLO-hap-selective-m6a-ratio-histogram.pdf", width=3, height=3)
+
+z %>%
+    group_by(
+        source
+    ) %>%
+    summarise(
+        totalw = sum(value*count),
+        count = sum(count),
+        mean = 100*totalw/count
+    )
+4.49/3.81
+3.81/4.49
+```
+
 
 
 ```{r}

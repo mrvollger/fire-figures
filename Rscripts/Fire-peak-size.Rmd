@@ -61,6 +61,80 @@ my_ggsave("Figures/FIRE-peak-size.pdf", width=3, height=3)
 ```
 
 ```{r}
+z=fire_df %>%
+    #filter(!is_TSS) %>% 
+    mutate(
+        fire_max = fire_coverage/coverage,
+    ) %>%
+    # pivot longer on atac_max and fire_max
+    pivot_longer(
+        cols=c(fire_max, atac_max),
+        names_to="seqtype",
+        values_to="value"
+    ) %>%
+    group_by(seqtype, group) %>%
+    mutate(
+        n=seq(1,n()),
+        psize=case_when(
+            psize>1000 ~ 1000,
+            #psize<50 ~ 50,
+            TRUE ~ psize
+        ),
+    ) %>%
+    #filter(n<=1000) %>%
+    data.frame %>%
+    ggplot(
+        aes(
+            x=value,
+            #y=FIRE_size_mean,
+            y=psize,
+        )
+    ) + 
+    geom_hex(bins=100) + 
+    stat_cor(
+        aes(label = paste(after_stat(rr.label), after_stat(p.label), sep = "~`,`~")),
+    ) + 
+    scale_fill_distiller("", 
+        palette = "Spectral", 
+        trans="log10"
+    ) +
+    scale_y_continuous(
+        "FIRE peak size (bp)",
+        expand = c(0, 0),
+        breaks = c(
+            "50"=50, `250`=250, `500`=500, `750`=750, "+1,000"=1000
+        ),
+        #trans="log10",
+        #label=comma,
+    ) +   # for both axes to remove unneeded padding
+    #annotation_logticks(side="l")+
+    facet_col(~seqtype, scales="free_x")+
+    scale_x_continuous(
+        "FIRE actuation",
+        #label=percent,
+    ) +
+    coord_cartesian(clip = "off") + # to avoid clipping of the very top of the top ridgeline
+    #theme_ridges() 
+    my_grid()
+my_ggsave("Figures/FIRE-peak-size-vs-percent-acc.pdf", width=3, height=3)
+
+```
+
+
+```{r}
+fire_df %>%
+    filter(!has_variant) %>%
+    select(
+        chrom,start,end,ostart,oend,fire_coverage,coverage
+    ) %>%
+    rename(
+        `#chrom` = chrom,
+     ) %>%
+    fwrite("Tables/FIRE-peak-size-no-variants.bed.gz", sep="\t")
+
+```
+
+```{r}
 sd_df = fire_df %>% 
     select(FIRE_start_ssd, FIRE_end_ssd, group, is_ctcf_peak, TSS, is_cage_peak) %>%
     pivot_longer(

@@ -4,42 +4,7 @@ source("Rscripts/Fire-peak-df.R")
 ```
 
 ```{r}
-library(stringr)
-vcf="data/GM12878.vcf.gz"
-vcf_df = fread(cmd=glue("bcftools view -f 'PASS' -i 'GT=\"HET\"' {vcf} | grep -v ^##"))  %>% 
-    mutate(start = POS-1) %>%
-    rename(
-        chrom="#CHROM",
-        end=POS
-    )
 
-pbsv = "data/GM12878.pbsv.vcf.gz"
-KVsep <- fixed(";")  #key-value separator
-pbsv_vcf = fread(cmd=glue("bcftools view -f 'PASS' -i 'GT=\"HET\"' {pbsv} | grep -v ^##")) %>%
-   mutate(start = POS-1) %>%
-    rename(
-        chrom="#CHROM",
-    ) %>%
-    select(-ALT) %>%
-    mutate(KVpairs = str_split(INFO, KVsep)) %>%
-    unnest(KVpairs) %>%
-    separate(KVpairs, into = c("key", "value"), sep="\\=") %>%
-    spread(key, value) %>%
-    mutate(
-        end = as.numeric(END)
-    )
-pbsv_ends = pbsv_vcf %>%
-    pivot_longer(
-        cols=c("start", "end")
-    ) %>%
-    select(chrom,name,value) %>%
-    mutate(
-        start = value, 
-        end = start + 1,
-    ) %>%
-    filter(!is.na(end))
-    #%>%unnest()
-max(pbsv_vcf$end-pbsv_vcf$start, na.rm=T)
 ```
 
 ```{r}

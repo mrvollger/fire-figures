@@ -2,8 +2,47 @@ source("Rscripts/utils.R")
 #library(regioneR)
 #BiocManager::install("BSgenome.Hsapiens.UCSC.hg38")
 library(BSgenome.Hsapiens.UCSC.hg38)
+library(stringr)
 
 if(F){
+
+    # VCF stuff
+    vcf="data/GM12878.vcf.gz"
+    vcf_df = fread(cmd=glue("bcftools view -f 'PASS' -i 'GT=\"HET\"' {vcf} | grep -v ^##"))  %>% 
+        mutate(start = POS-1) %>%
+        rename(
+            chrom="#CHROM",
+            end=POS
+        )
+
+    pbsv = "data/GM12878.pbsv.vcf.gz"
+    KVsep <- fixed(";")  #key-value separator
+    pbsv_vcf = fread(cmd=glue("bcftools view -f 'PASS' -i 'GT=\"HET\"' {pbsv} | grep -v ^##")) %>%
+    mutate(start = POS-1) %>%
+        rename(
+            chrom="#CHROM",
+        ) %>%
+        select(-ALT) %>%
+        mutate(KVpairs = str_split(INFO, KVsep)) %>%
+        unnest(KVpairs) %>%
+        separate(KVpairs, into = c("key", "value"), sep="\\=") %>%
+        spread(key, value) %>%
+        mutate(
+            end = as.numeric(END)
+        )
+    pbsv_ends = pbsv_vcf %>%
+        pivot_longer(
+            cols=c("start", "end")
+        ) %>%
+        select(chrom,name,value) %>%
+        mutate(
+            start = value, 
+            end = start + 1,
+        ) %>%
+        filter(!is.na(end))
+        #%>%unnest()
+    ### END VCF stuff
+
     FAI = fread("~/assemblies/hg38.analysisSet.chrom.sizes") %>%
         filter(!grepl("_", V1))
     colnames(FAI) = c("chrom", "end")
@@ -169,10 +208,18 @@ if(F){
         ) %>%
         bed_map(atac, atac_max = max(atac_sig)) %>%
         bed_map(dnase, dnase_max = max(dnase_sig)) %>%
+        bed_map(vcf_df,
+            n_SNVs = n(),
+        ) %>% 
+        bed_map(pbsv_ends,
+            n_SVs = n(),
+        ) %>%
         replace_na(
             list(
                 encode_count = 0,
                 sd_count=0,
+                n_SNVs=0,
+                n_SVs=0,
                 TSS=0,
                 is_TSS=F,
                 is_atac_peak=F,
@@ -190,6 +237,9 @@ if(F){
         ) %>%
         arrange(-acc_percent, -n) %>%
         mutate(
+            has_snv = n_SNVs > 0,
+            has_sv = n_SVs > 0,
+            has_variant = has_snv | has_sv,
             group = case_when(
                 floor(acc_percent * 20) / 20 >= 0.9 ~ 0.9,
                 TRUE ~ floor(acc_percent * 20) / 20,
@@ -269,6 +319,9 @@ if(F){
         ctcf_peaks_df,
         ctcf_motifs,
         sds,
+        pbsv_vcf,
+        pbsv_ends,
+        vcf_df,
         tss,
         imprinted,
         SDs,
