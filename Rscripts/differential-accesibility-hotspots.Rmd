@@ -209,7 +209,7 @@ dev.off()
 # ~Mbp similarity comparison, intra vs inter hap similarity
 
 ```{r}
-library(lsa)
+#library(lsa)
 AUO = F
 if(AUO){
     peak_files = c(
