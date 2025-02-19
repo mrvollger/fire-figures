@@ -25,7 +25,11 @@ mean(lung_peaks$coverage_H2)
 sd(lung_peaks$coverage_H2)
 
 lung_peaks %>% filter(coverage_H1 >= 10, coverage_H2 >= 10) %>%  filter(pass_coverage) %>% filter(chrom != "chrX") %>% filter(chrom != "chrY") %>% nrow()
-lung_hap_peaks = lung_peaks %>% filter(p_adjust <= 0.05) %>% as_tibble
+lung_hap_peaks = lung_peaks %>%
+ filter(p_adjust <= 0.05) %>% 
+    filter(chrom != "chrX") %>%
+    filter(chrom != "chrY") 
+ as_tibble
 lung_hap_peaks
 #lung_track = my_read_bed("../FIREv2.0/results/ST001-lung/FDR-peaks/FDR.track.bed.gz")
 
@@ -61,7 +65,7 @@ z = liver_track %>%
         hap2_per = fire_coverage_H2/coverage_H2,
         diff = hap1_per - hap2_per, 
     ) 
-
+#z=liver_peaks
 tissue_peaks_compare_df = lung_hap_peaks %>%
     bed_map(
         z,
@@ -273,3 +277,5 @@ ppd %>%
     )
 my_ggsave("Figures/liver-lung-histogram-of-hap-difference.pdf", height=3, width=4)
 ```
+
+

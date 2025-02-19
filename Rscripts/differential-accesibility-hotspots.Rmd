@@ -209,7 +209,7 @@ dev.off()
 # ~Mbp similarity comparison, intra vs inter hap similarity
 
 ```{r}
-#library(lsa)
+library(lsa)
 AUO = F
 if(AUO){
     peak_files = c(
@@ -232,6 +232,12 @@ all_peaks
 
 
 ```{r}
+if(AUO){
+    data_tag = "AUO"
+} else {
+    data_tag="lymphoblast"
+}
+
 if(AUO){
     PS00381 = fread("results/PS00381/FDR-peaks/FDR.track.bed.gz")
     PS00382 = fread("results/PS00382/FDR-peaks/FDR.track.bed.gz")
@@ -394,7 +400,7 @@ similarity_df %>%
     theme_cowplot() +
     theme(legend.position="top")
 #my_ggsave("Figures/MHC-different-epi-haplotypes.pdf", width=22, height=8)
-my_ggsave("Figures/All-different-epi-haplotypes.pdf", width=22, height=22)
+my_ggsave("Figures/diff-acc-hotspots-all-different-epi-haplotypes-{data_tag}.pdf", width=22, height=22)
 ```
 
 
@@ -533,7 +539,7 @@ rank_100k %>%
     theme_minimal_grid()+
     theme(legend.position="top")
 #my_ggsave("Figures/MHC-different-epi-haplotypes-rank.pdf", width=12, height=8)
-my_ggsave("Figures/inter-sample-epi-comparison-rank-ideogram.pdf", width=12, height=22)
+my_ggsave("Figures/diff-acc-hotspot-inter-sample-epi-comparison-rank-ideogram-{data_tag}.pdf", width=12, height=22)
 ```
 
 # check if we have more overlap than expected with SDs or ALTs
@@ -546,7 +552,11 @@ merged_both_rank2 = bed_merge(both_rank_2, max_dist=1e5+1,
 merged_both_rank2
 
 merged_both_rank2 %>% 
-    fwrite("Figures/inter-sample-epi-comparison-both-rank-two.txt", sep="\t", quote=F, na="NA")
+    fwrite(
+        glue(
+            "Figures/diff-acc-hotspots-inter-sample-epi-comparison-both-rank-two-{data_tag}.txt",
+        ),
+        sep="\t", quote=F, na="NA")
 
 
 random_windows = merged_both_rank2 %>%
@@ -625,10 +635,10 @@ zz=null_both_rank2 %>%
     )
 zz
 zz %>%
-    fwrite("Figures/inter-sample-epi-comparison-SD-alt-overlaps.txt", sep="\t")
+    fwrite("Figures/diff-acc-hotspots-inter-sample-epi-comparison-SD-alt-overlaps-{data_tag}.txt", sep="\t")
 
 
-my_ggsave("Figures/inter-sample-epi-comparison-SD-alt-overlaps.pdf", width=4, height=3)
+my_ggsave("Figures/diff-acc-hotspots-inter-sample-epi-comparison-SD-alt-overlaps-{data_tag}.pdf", width=4, height=3)
 table(null_both_rank2$average_alt_overlap)
 ```
 
@@ -660,7 +670,7 @@ rank_100k %>%
     ) +
     #facet_zoom(ylim = c(0, 100e6)) +
     theme(legend.position="top")
-my_ggsave("Figures/inter-sample-epi-comparison-rank-histogram.pdf", height=6, width=8)
+my_ggsave("Figures/diff-acc-hotspots-inter-sample-epi-comparison-rank-histogram-{data_tag}.pdf", height=6, width=8)
 ```
 
 
@@ -814,7 +824,24 @@ z=to_use %>%
         strip.background =element_rect(fill="white"),
         #strip.text.x = element_text(size = 4, color = "black")
     ) 
-my_ggsave("Figures/significant-enrichment-of-hap-specific-peaks.pdf", width=8, height=3)
+my_ggsave("Figures/diff-acc-hotspots-significant-enrichment-of-hap-specific-peaks.pdf", width=8, height=3)
+```
+
+```{r}
+txt = to_use %>% 
+    filter(chrom=="chr6") %>%
+    filter(p_adjust <=0.05 ) %>%
+    group_by(my_group) %>%
+    filter(
+        p_adjust == min(p_adjust)
+    ) 
+
+txt%>%
+    fwrite(
+        "Figures/diff-acc-hotspots-significant-enrichment-of-hap-specific-peaks.txt",
+        sep="\t", quote=F, na="NA"
+    )
+txt
 ```
 
 ```{r}
@@ -897,8 +924,36 @@ class_specifc_test_df %>%
     theme(
         legend.position="right",
     )
-my_ggsave("Figures/significant-enrichment-of-hap-specific-peaks-HLA-classes.pdf", width=3, height=2)
+my_ggsave("Figures/diff-acc-hotspots-significant-enrichment-of-hap-specific-peaks-HLA-classes-{data_tag}.pdf", width=3, height=2)
 
 hla_classes %>% filter(my_group=="CD8+")
 rr %>% filter(my_group=="CD8+") %>% filter(p_value<0.05) %>% filter(n_hap_peaks == 15)
+```
+
+
+
+# details on Chr6:32595752-32670415
+# chr6:32,595,752-32,670,415
+```{r}
+fire_df %>%
+    filter(chrom != "chrX") %>%
+    mutate(
+        is_region = case_when(
+            # 32595752-32670415
+            chrom == "chr6" & start >= 32595752 & end <= 32670415 ~ "HLA",
+            TRUE ~ "Other",
+        )
+    ) %>% 
+    group_by(is_region) %>%
+    summarise(
+        n_hap_selective = sum(p_value <= 0.05, na.rm=TRUE),
+        n_total = n(),
+        frac_hap_selective = n_hap_selective/n_total,
+    )
+
+vcf_df %>%
+    filter(chrom != "chrX") %>%
+    filter(chrom == "chr6") %>%
+    filter(start >= 32595752, end <= 32670415) 
+
 ```
