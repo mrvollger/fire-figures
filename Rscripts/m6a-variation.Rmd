@@ -1,0 +1,189 @@
+```{r}
+# napa region chr19:47,483,022-47,485,340
+
+# movies that appear twice
+#  m84039_230401_034725_s4
+#  m84039_230401_031619_s3
+
+
+bam="data/gm12878.napa.bam"
+ft_cmd = glue('ft extract -F 2308 --all - -s {bam}')
+ft_extract=fread(cmd=ft_cmd) %>%
+    mutate(
+        movie_name = gsub("/[0-9]+/ccs$", "", fiber),
+        group = paste(movie_name, RG),
+    ) %>%
+    filter(RG != "GM12878_WGS") %>%
+    filter(
+        !(
+            (movie_name %in% c("m84039_230401_034725_s4", "m84039_230401_031619_s3")) &
+            (RG %in% c("GM12878", "GM12878_WGS"))
+        )
+    ) %>%
+    unique() %>%
+    data.table
+table(ft_extract$RG)
+nrow(ft_extract)
+length(unique(ft_extract$fiber))
+
+ft_cmd2 = glue('ft center -s --bed Tables/NAPA.bed {bam}')
+napaz = fread(cmd=ft_cmd2) %>%
+    mutate(
+        movie_name = gsub("/[0-9]+/ccs$", "", query_name),
+        group = paste(movie_name, RG),
+    ) %>%
+    filter(RG != "GM12878_WGS") %>%
+    filter(
+        !(
+            (movie_name %in% c("m84039_230401_034725_s4", "m84039_230401_031619_s3")) &
+            (RG %in% c("GM12878", "GM12878_WGS"))
+        )
+    ) %>%
+    unique() %>%
+    data.table
+
+table(napaz$RG)
+length(unique(ft_extract$fiber))
+nrow(ft_extract)
+```
+
+```{r}
+napa = napaz %>%
+    merge(
+        ft_extract %>% select(fiber, total_AT_bp, total_m6a_bp, RG, movie_name),
+        by.x=c("query_name", "RG", "movie_name"), 
+        by.y=c("fiber", "RG", "movie_name"),
+    ) %>%
+    mutate(
+        percent_m6a = 100*total_m6a_bp / total_AT_bp,        
+    ) %>%
+    arrange(movie_name, RG, percent_m6a) %>%
+    mutate(
+        query_name = factor(query_name, levels=unique(query_name)),
+        row = as.numeric(query_name),
+        # cut based on % m6a content
+        m6a_name = cut(
+            percent_m6a,
+            breaks=seq(0,100),
+        ),
+    ) 
+
+napa
+table(napa$movie_name)
+```
+
+
+```{r}
+z=napa %>%
+    #filter(abs(centered_start) < 2000) %>%
+    filter(centered_start > -1000 & centered_end < 2050) %>%
+    ggplot(
+        aes(
+            xmin=centered_start, xmax=centered_end,
+            ymin=row-0.4, ymax=row+0.4,
+            fill=centered_position_type
+        )
+    ) +
+    geom_rect() + 
+    facet_col(~group, scales="free_y", space="free") +
+    my_grid() + 
+    theme(
+        legend.position="none",
+    )
+my_ggsave("Figures/m6a-variation-napa.pdf", height=10, width=6)
+```
+
+
+```{r}
+
+
+msps = ft_extract %>%
+    filter(msp_starts!=".") %>%
+    select(fiber, fiber_length, RG, msp_starts, msp_lengths, movie_name, group) %>%
+    cSplit(c("msp_starts", "msp_lengths"), direction = "long", ) 
+
+
+msps
+# msp size by group
+msps %>%
+    group_by(group) %>%
+    mutate(
+        mean_msp_size = mean(msp_lengths),
+        median = median(msp_lengths),
+        sd_msp_size = sd(msp_lengths),
+        n_msp = n(),
+    ) %>%
+    ungroup() %>%
+    arrange(median, mean_msp_size) %>%
+    mutate(
+        group = factor(group, levels=unique(group)),
+        msp_lengths = case_when(
+            msp_lengths > 350 ~ 350,
+            TRUE ~ msp_lengths
+        )
+    ) %>%
+    ggplot(aes(x=msp_lengths, color=group)) +
+    geom_step(aes(y=..density..), stat="bin", binwidth=5) +
+    #geom_histogram(aes(y=after_stat(density)), bins=50, alpha=0) +
+    scale_x_continuous(
+        "MSP length",
+        #trans="log10"
+    ) +
+    my_grid() +
+    facet_wrap(~group, scales="free_y") +
+    theme(
+        legend.position="none",
+        # make x axis font size larger
+        #axis.text.x = element_text(size=16),
+        # make x axis label larger
+        #axis.title.x = element_text(size=16),
+        # make facet label text smaller
+        strip.text = element_text(size=3),
+    )
+my_ggsave("Figures/m6a-variation-napa-msp-size.pdf", height=6, width=8)
+```
+
+# plot varing m6a / AT content
+```{r}
+t=ft_extract %>%
+    mutate(
+        percent_m6a = 100*total_m6a_bp / total_AT_bp,
+    ) %>%
+    group_by(group) %>%
+    mutate(
+        total_percent_m6a = sum(total_m6a_bp) / sum(total_AT_bp),
+    ) %>%
+    ungroup() %>%
+    arrange(total_percent_m6a) %>%
+    mutate(
+        group = factor(group, levels=unique(group)),
+    ) 
+
+z = t %>%    
+    ggplot(aes(x=percent_m6a, y=group)) +
+    geom_violin(
+        aes(weight = total_AT_bp),
+       scale = "width" 
+    ) +
+    my_grid() +
+    theme(
+        legend.position="top",
+    )
+my_ggsave("Figures/m6a-variation-napa-m6a-percent-violin.pdf", height=3, width=6)
+
+z = t %>%
+    ggplot(aes(x=percent_m6a, color=group)) +
+    #geom_step(aes(y=..density..), stat="bin", binwidth=0.1) +
+    geom_density(adjust = 0.5) +
+    scale_x_continuous(
+        "Percent of A/T bp with m6A",
+    ) +
+    my_grid() +
+    facet_wrap(~group, scales="free_y") +
+    theme(
+        legend.position="none",
+        strip.text = element_text(size=3),
+    )
+my_ggsave("Figures/m6a-variation-napa-m6a-percent.pdf", height=6, width=6)
+```
+

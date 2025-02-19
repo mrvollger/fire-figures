@@ -1,0 +1,58 @@
+```{r}
+fp = fread("Revision-1/footprint/all.tbl")
+fp 
+```
+
+```{r}
+by_read_fp = fp %>%
+    mutate(
+        has_fp = has_spanning_msp & `module:0-6` & fire_qual>240,
+        is_fire = fire_qual>240,
+    ) %>%
+    #filter(n_spanning_fibers != 186) %>%
+    group_by(sample, haplotype, fiber_name) %>%
+    summarise(
+        has_E_box_fp = sum(has_fp & type=="E-box"),
+        has_CCAAT_fp = sum(has_fp & type=="CCAAT"),
+        has_both_fp = has_E_box_fp>0 & has_CCAAT_fp>0,
+        hap_reads = case_when(
+            haplotype == "H1" ~ haplotype_H1_count[1],
+            haplotype == "H2" ~ haplotype_H2_count[1],
+            TRUE ~ NA
+        ),
+        has_fire = is_fire,
+        total_reads = n_spanning_fibers[1],
+        n_in_group = n(),
+    ) %>%
+    filter(
+        n_in_group == 2,
+    ) %>%
+    unique()
+by_read_fp
+table(by_read_fp$n_in_group)
+table(by_read_fp$has_fire)
+by_read_fp
+```
+
+```{r}
+by_read_fp %>%
+    group_by(sample, haplotype) %>%
+    summarise(
+        total_reads = total_reads[1],
+        hap_reads = hap_reads[1],
+        n_fire = sum(has_fire),
+        frac_with_fire = n_fire / hap_reads,
+        n_E_box_fp = sum(has_E_box_fp),
+        frac_with_E_box_fp = n_E_box_fp / hap_reads,
+        n_CCAAT_fp = sum(has_CCAAT_fp),
+        frac_with_CCAAT_fp = n_CCAAT_fp / hap_reads,
+        n_both_fp = sum(has_both_fp),
+        frac_with_both_fp = n_both_fp / hap_reads,
+    )
+    
+```
+
+```{r}
+fp %>%
+    filter(sample == "PS00381")
+```
