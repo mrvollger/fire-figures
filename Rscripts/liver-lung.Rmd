@@ -279,3 +279,143 @@ my_ggsave("Figures/liver-lung-histogram-of-hap-difference.pdf", height=3, width=
 ```
 
 
+
+#
+# test foer tissue enrichment
+#
+```{r}
+encode_k562 = my_read_bed("data/k562-data/K562.peaks.bed.gz")
+k562 = my_read_bed(
+    "../FIREv2.0/Revision-1/just-more-samples/results/K562-PS00075/FDR-peaks/FDR-FIRE-peaks.bed.gz"
+    ) 
+all_encode= my_read_bed("https://www.encodeproject.org/files/ENCFF503GCK/@@download/ENCFF503GCK.tsv")
+#encode_lung = my_read_bed("https://www.encodeproject.org/files/ENCFF691GQY/@@download/ENCFF691GQY.bed.gz") # this was embyonic lung
+#encode_lung = my_read_bed("https://www.encodeproject.org/files/ENCFF349QTP/@@download/ENCFF349QTP.bed.gz") # doesn't work
+encode_lung = my_read_bed("https://www.encodeproject.org/files/ENCFF748HFC/@@download/ENCFF748HFC.bed.gz") # works but not that well
+#encode_lung = my_read_bed("https://www.encodeproject.org/files/ENCFF349QTP/@@download/ENCFF349QTP.bed.gz") # doesnt work
+encode_liver = my_read_bed("https://www.encodeproject.org/files/ENCFF905THS/@@download/ENCFF905THS.bed.gz")
+```
+
+# make encode datasets that are unique to each tissue
+```{r}
+encode_sets = bind_rows(
+    list(
+        #k562=encode_k562,
+        GM12878=dnase_peaks,
+        lung=encode_lung,
+        liver=encode_liver
+    ),
+    .id="tissue",
+)
+
+encode_unique = encode_sets %>%
+    bed_map(
+        encode_sets,
+        is_unique = n() == 1,
+        n_encode = n(),
+    )
+table(encode_unique$n_encode)
+```
+
+```{r}
+min_frac_acc = max(
+    min(liver_peaks$fire_coverage/liver_peaks$coverage),
+    min(lung_peaks$fire_coverage/lung_peaks$coverage),
+    min(k562$fire_coverage/k562$coverage)
+); min_frac_acc
+
+tissue_peaks = bind_rows(
+    list(lung=lung_peaks, liver=liver_peaks, GM12878=fire_df, k562=k562),
+    .id="tissue",
+) %>%
+    #filter(fire_coverage/coverage >= min_frac_acc) %>%
+    bed_map(
+        encode,
+        is_tissue_invariant = sum(component == "Tissue invariant") > 0,
+    ) %>%
+    bed_map(
+        #encode_unique %>% filter(is_unique),
+        encode_unique,
+        is_encode_liver = sum(tissue == "liver") > 0,
+        is_encode_lung = sum(tissue == "lung") > 0,
+        is_encode_gm12878 = sum(tissue == "GM12878") > 0,
+        is_encode_k562 = sum(tissue == "k562") > 0,
+        n_encode = n(),
+    ) %>%
+    replace_na(
+        list(
+            is_encode_liver=FALSE,
+            is_encode_lung=FALSE,
+            is_encode_k562=FALSE,
+            is_encode_gm12878=FALSE,
+            is_tissue_invariant=FALSE,
+            n_encode=0
+        )
+    ) 
+
+tissue_peaks %>%
+    group_by(tissue) %>%
+    summarise(
+        n_peaks = n(),
+    ) 
+
+unique(encode$component)
+```
+
+```{r}
+tissue_overlap_map = tissue_peaks %>%
+    filter(!is_tissue_invariant) %>%
+    filter(tissue!="k562") %>%
+    #filter(tissue!="GM12878") %>%
+    pivot_longer(
+        cols=c(is_encode_liver, is_encode_lung, is_encode_gm12878),
+        names_to="encode_tissue",
+        values_to="is_encode_tissue",
+    ) %>%
+    group_by(tissue, encode_tissue) %>%
+    summarise(
+        n_peaks = n(),
+        n_encode_peaks = sum(is_encode_tissue),
+    ) %>%
+    mutate(
+        encode_frac = n_encode_peaks/n_peaks,
+    ) 
+tissue_overlap_map
+
+# make a ggplot heatmap of the tissue overlap encode_frac
+tissue_overlap_map %>%
+    ggplot(aes(
+        x=tissue,
+        y=encode_tissue,
+        fill=encode_frac,
+    )) +
+    geom_tile() +
+    geom_text(aes(label=round(encode_frac, 2)), size=2) +
+    scale_fill_gradient(
+        low="white",
+        high="darkred",
+        name="Fraction of FIRE peaks\nin encode tissue",
+        #limits=c(0,1),
+    ) +
+    scale_x_discrete(
+        labels=c(
+            "liver"="Liver",
+            "lung"="Lung",
+            "GM12878"="GM12878",
+            "k562"="K562"
+        )
+    ) +
+    scale_y_discrete(
+        labels=c(
+            "is_encode_liver"="Liver",
+            "is_encode_lung"="Lung",
+            "is_encode_gm12878"="GM12878"
+        )
+    ) +
+    my_grid() 
+my_ggsave("Figures/liver-lung-tissue-encode-heatmap.pdf", height=3, width=4)
+
+    
+# remove tissue invaiate from these peaks sets first 
+
+```

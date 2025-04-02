@@ -41,6 +41,7 @@ PS00283.bc2018.s3       m84039_230401_031619_s3 125853842       945579352       
 "
 m6a_df = fread(data) %>% 
   mutate(m6a_density = total_m6a_bp / total_AT_bp)
+m6a_df
 m6a_df = bind_rows(list(m6a_df, all_merged[!SMRTcell %in% m6a_df$SMRTcell] )) %>%
     mutate(
         type = case_when(

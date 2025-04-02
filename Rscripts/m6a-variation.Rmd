@@ -54,13 +54,20 @@ napa = napaz %>%
         by.x=c("query_name", "RG", "movie_name"), 
         by.y=c("fiber", "RG", "movie_name"),
     ) %>%
+    group_by(RG, movie_name) %>%
     mutate(
         percent_m6a = 100*total_m6a_bp / total_AT_bp,        
+        group_m6a = sum(total_m6a_bp)/sum(total_AT_bp),
+        ave_msp_size = (centered_end - centered_start)[centered_position_type=="msp"] %>% mean,
+        start = centered_start + centering_position,
+        end = centered_end + centering_position, 
     ) %>%
-    arrange(movie_name, RG, percent_m6a) %>%
+    ungroup() %>%
+    arrange(group_m6a, -percent_m6a) %>%
     mutate(
         query_name = factor(query_name, levels=unique(query_name)),
         row = as.numeric(query_name),
+        group = factor(group, levels=unique(group)),
         # cut based on % m6a content
         m6a_name = cut(
             percent_m6a,
@@ -74,23 +81,43 @@ table(napa$movie_name)
 
 
 ```{r}
+zoom_by = -500
 z=napa %>%
     #filter(abs(centered_start) < 2000) %>%
-    filter(centered_start > -1000 & centered_end < 2050) %>%
+    filter(centered_position_type=="m6a" | centered_position_type=="nuc") %>%
+    filter(centered_start < 2500 - zoom_by & centered_end > 0 + zoom_by) %>%
     ggplot(
         aes(
-            xmin=centered_start, xmax=centered_end,
+            xmin=start, xmax=end+1,
             ymin=row-0.4, ymax=row+0.4,
-            fill=centered_position_type
+            fill=centered_position_type,
+            alpha=centered_position_type,
         )
     ) +
     geom_rect() + 
+    #geom_xsidehistogram(data = . %>% filter(centered_position_type=="m6a"),
+    #    aes(x=start, group=NULL), binwidth=1) +
+    scale_y_continuous(
+        breaks = seq(0,1000),
+        labels = rep("", 1001),
+    ) + 
+    scale_x_continuous(
+        "Genomic position (NAPA promoter)",
+        limits=c(47483022 + zoom_by, 47483022+2500 - zoom_by),
+        labels = comma,
+    ) +
+    scale_fill_manual(
+        values=c("m6a"="purple", "nuc"="gray")
+    ) + 
+    scale_alpha_manual(
+        values=c("m6a"=1, "nuc"=0.5)
+    ) +
     facet_col(~group, scales="free_y", space="free") +
     my_grid() + 
     theme(
         legend.position="none",
     )
-my_ggsave("Figures/m6a-variation-napa.pdf", height=10, width=6)
+my_ggsave("Figures/m6a-variation-napa.pdf", height=8, width=6)
 ```
 
 
@@ -112,6 +139,8 @@ msps %>%
         median = median(msp_lengths),
         sd_msp_size = sd(msp_lengths),
         n_msp = n(),
+        frac_over_150 = sum(msp_lengths > 150) / n_msp,
+        frac_1_bp = sum(msp_lengths == 1) / n_msp,
     ) %>%
     ungroup() %>%
     arrange(median, mean_msp_size) %>%
@@ -124,6 +153,40 @@ msps %>%
     ) %>%
     ggplot(aes(x=msp_lengths, color=group)) +
     geom_step(aes(y=..density..), stat="bin", binwidth=5) +
+    geom_vline(
+        xintercept=150,
+        linetype="dashed",
+        color="black",
+        linewidth=0.25,
+    ) +
+    geom_label(
+        data = . %>% group_by(group) %>% summarise(stat=unique(frac_over_150)),
+        aes(x=150, y=0, 
+            label=paste0(
+                percent(round(stat,3)),
+                " > 150 bp"
+            ),
+        ),
+        size = 2,
+        alpha=0.5,
+        color="black",
+        hjust=0,
+        vjust=-0.5,
+    ) +
+    geom_label(
+        data = . %>% group_by(group) %>% summarise(stat=unique(frac_1_bp)),
+        aes(x=1, y=0, 
+            label=paste0(
+                percent(round(stat,3)),
+                " == 1 bp"
+            ),
+        ),
+        size = 2,
+        alpha=0.5,
+        color="black",
+        hjust=0,
+        vjust=-5.5,
+    ) +
     #geom_histogram(aes(y=after_stat(density)), bins=50, alpha=0) +
     scale_x_continuous(
         "MSP length",
@@ -131,6 +194,7 @@ msps %>%
     ) +
     my_grid() +
     facet_wrap(~group, scales="free_y") +
+    #coord_cartesian(clip="off") +
     theme(
         legend.position="none",
         # make x axis font size larger
